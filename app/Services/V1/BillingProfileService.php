@@ -1,0 +1,141 @@
+<?php
+
+namespace App\Services\V1;
+
+use App\Models\Landlord\BillingProfile;
+use App\Models\Landlord\BillingRule;
+use App\Models\Landlord\Subscription;
+use App\Models\Tenancy\Tenant;
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Collection;
+
+class BillingProfileService
+{
+    public function assignProfileToWorkspace(Tenant $tenant, BillingProfile $profile): void
+    {
+        $meta = $tenant->meta ?? [];
+        $meta['billing_profile_uuid'] = $profile->uuid;
+        $meta['billing_profile_name'] = $profile->name;
+
+        $tenant->meta = $meta;
+        $tenant->save();
+
+        $subscription = Subscription::query()
+            ->where('tenant_id', $tenant->id)
+            ->latest('id')
+            ->first();
+
+        if ($subscription) {
+            $subscription->billing_profile_id = $profile->id;
+
+            $subscriptionMeta = $subscription->meta ?? [];
+            $subscriptionMeta['billing_profile_uuid'] = $profile->uuid;
+            $subscriptionMeta['billing_profile_name'] = $profile->name;
+            $subscription->meta = $subscriptionMeta;
+            $subscription->save();
+        }
+    }
+
+    public function matchingRule(BillingProfile $profile, int $registeredUnits, CarbonInterface|string|null $date = null): ?BillingRule
+    {
+        return $this->matchingRuleFromCollection(
+            $this->activeRulesForDate($profile, $date),
+            $registeredUnits
+        );
+    }
+
+    public function hasOverlappingRule(BillingProfile $profile, array $payload, ?int $ignoreRuleId = null): bool
+    {
+        $rangeStart = (int) $payload['range_start'];
+        $rangeEnd = $payload['range_end'] ?? null;
+        $effectiveFrom = $payload['effective_from'];
+        $effectiveTo = $payload['effective_to'] ?? null;
+
+        return BillingRule::query()
+            ->where('billing_profile_id', $profile->id)
+            ->when($ignoreRuleId !== null, fn ($query) => $query->whereKeyNot($ignoreRuleId))
+            ->where('status', 'active')
+            ->where(function ($query) use ($rangeStart, $rangeEnd) {
+                $query->where(function ($inner) use ($rangeStart, $rangeEnd) {
+                    $inner->where('range_start', '<=', $rangeStart)
+                        ->where(function ($rangeQuery) use ($rangeStart) {
+                            $rangeQuery->whereNull('range_end')
+                                ->orWhere('range_end', '>=', $rangeStart);
+                        });
+                })->orWhere(function ($inner) use ($rangeEnd) {
+                    if ($rangeEnd === null) {
+                        $inner->whereNotNull('id');
+                        return;
+                    }
+
+                    $inner->where('range_start', '<=', $rangeEnd)
+                        ->where(function ($rangeQuery) use ($rangeEnd) {
+                            $rangeQuery->whereNull('range_end')
+                                ->orWhere('range_end', '>=', $rangeEnd);
+                        });
+                });
+            })
+            ->where(function ($query) use ($effectiveFrom, $effectiveTo) {
+                $query->where(function ($inner) use ($effectiveFrom, $effectiveTo) {
+                    $inner->where('effective_from', '<=', $effectiveFrom)
+                        ->where(function ($dateQuery) use ($effectiveFrom) {
+                            $dateQuery->whereNull('effective_to')
+                                ->orWhere('effective_to', '>=', $effectiveFrom);
+                        });
+                })->orWhere(function ($inner) use ($effectiveTo) {
+                    if ($effectiveTo === null) {
+                        $inner->whereNotNull('id');
+                        return;
+                    }
+
+                    $inner->where('effective_from', '<=', $effectiveTo)
+                        ->where(function ($dateQuery) use ($effectiveTo) {
+                            $dateQuery->whereNull('effective_to')
+                                ->orWhere('effective_to', '>=', $effectiveTo);
+                        });
+                });
+            })
+            ->exists();
+    }
+
+    public function activeRulesForDate(BillingProfile $profile, CarbonInterface|string|null $date = null): Collection
+    {
+        $date = $date instanceof CarbonInterface ? $date->toDateString() : ($date ?: now()->toDateString());
+
+        return BillingRule::query()
+            ->select([
+                'id',
+                'uuid',
+                'billing_profile_id',
+                'range_start',
+                'range_end',
+                'price_cents',
+                'currency',
+                'effective_from',
+                'effective_to',
+                'sort_order',
+                'status',
+            ])
+            ->where('billing_profile_id', $profile->id)
+            ->where('status', 'active')
+            ->where('effective_from', '<=', $date)
+            ->where(function ($query) use ($date) {
+                $query->whereNull('effective_to')
+                    ->orWhere('effective_to', '>=', $date);
+            })
+            ->orderByDesc('effective_from')
+            ->orderByDesc('range_start')
+            ->get();
+    }
+
+    public function matchingRuleFromCollection(Collection $rules, int $registeredUnits): ?BillingRule
+    {
+        return $rules->first(function (BillingRule $rule) use ($registeredUnits) {
+            if ($rule->range_start > $registeredUnits) {
+                return false;
+            }
+
+            return $rule->range_end === null || $rule->range_end >= $registeredUnits;
+        });
+    }
+}
