@@ -19,13 +19,13 @@ class TenantUserResource extends ApiJsonResource
             'email' => $this->email,
             'phone' => $this->phone,
             'status' => $this->status,
-            'base_user' => $this->whenLoaded('baseUser', fn () => [
+            'base_user' => $this->whenLoaded('baseUser', fn () => $this->baseUser ? [
                 'uuid' => $this->baseUser->uuid,
                 'username' => $this->baseUser->username,
                 'email' => $this->baseUser->email,
                 'phone' => $this->baseUser->phone,
                 'status' => $this->baseUser->status,
-            ]),
+            ] : null),
             'roles' => UserRoleSummaryResource::collection($this->whenLoaded('roles')),
             'direct_permissions' => PermissionResource::collection($this->whenLoaded('permissions')),
             'permissions' => $this->when($hasAccessRelations, function () {

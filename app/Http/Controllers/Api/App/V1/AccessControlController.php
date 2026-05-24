@@ -33,6 +33,15 @@ class AccessControlController extends Controller
             ->orderBy('module')
             ->orderBy('name');
 
+        if (!empty($filters['search'] ?? null)) {
+            $query->where(function ($innerQuery) use ($filters) {
+                $search = strtolower($filters['search']);
+                $innerQuery
+                    ->where('module', 'like', $search.'%')
+                    ->orWhere('name', 'like', $search.'%');
+            });
+        }
+
         if (!empty($filters['module'] ?? null)) {
             $query->where('module', 'like', strtolower($filters['module']).'%');
         }
@@ -64,6 +73,10 @@ class AccessControlController extends Controller
             ->where('guard_name', 'api')
             ->withCount('permissions')
             ->orderBy('name');
+
+        if (!empty($filters['search'] ?? null)) {
+            $query->where('name', 'like', strtolower($filters['search']).'%');
+        }
 
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', strtolower($filters['name']).'%');

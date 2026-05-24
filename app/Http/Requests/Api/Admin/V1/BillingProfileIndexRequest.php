@@ -14,6 +14,7 @@ class BillingProfileIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'name' => ['nullable', 'string', 'max:120'],
             'status' => ['nullable', 'in:active,inactive'],
             'billing_interval' => ['nullable', 'in:monthly,quarterly,annually'],

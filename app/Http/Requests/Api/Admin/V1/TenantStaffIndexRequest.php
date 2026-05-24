@@ -14,6 +14,7 @@ class TenantStaffIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'name' => ['nullable', 'string', 'max:120'],
             'phone' => ['nullable', 'string', 'max:30'],
             'status' => ['nullable', 'in:active,suspended'],

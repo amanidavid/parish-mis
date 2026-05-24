@@ -14,6 +14,7 @@ class StaffPropertyAssignmentIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:150'],
             'property_uuid' => ['nullable', 'uuid'],
             'user_uuid' => ['nullable', 'uuid'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

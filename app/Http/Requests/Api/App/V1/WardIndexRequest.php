@@ -14,6 +14,7 @@ class WardIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'country_uuid' => ['nullable', 'uuid'],
             'region_uuid' => ['nullable', 'uuid'],
             'district_uuid' => ['nullable', 'uuid'],

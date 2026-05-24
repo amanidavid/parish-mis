@@ -14,6 +14,7 @@ class RegionIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'country_uuid' => ['nullable', 'uuid'],
             'name' => ['nullable', 'string', 'max:120'],
             'status' => ['nullable', 'in:active,inactive'],

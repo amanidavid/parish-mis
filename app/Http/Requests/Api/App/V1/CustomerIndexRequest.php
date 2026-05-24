@@ -14,6 +14,7 @@ class CustomerIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:150'],
             'unit_uuid' => ['nullable', 'uuid'],
             'property_uuid' => ['nullable', 'uuid'],
             'customer_type' => ['nullable', 'in:individual,business'],

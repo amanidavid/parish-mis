@@ -14,6 +14,7 @@ class PropertyIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:150'],
             'type_uuid' => ['nullable', 'uuid'],
             'country_uuid' => ['nullable', 'uuid'],
             'region_uuid' => ['nullable', 'uuid'],

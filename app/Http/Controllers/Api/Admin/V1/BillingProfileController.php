@@ -29,6 +29,10 @@ class BillingProfileController extends Controller
         $filters = $request->validated();
         $query = BillingProfile::query()->withCount('rules');
 
+        if (!empty($filters['search'] ?? null)) {
+            $query->where('name', 'like', $filters['search'].'%');
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }

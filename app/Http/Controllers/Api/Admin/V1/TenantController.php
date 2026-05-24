@@ -44,6 +44,10 @@ class TenantController extends Controller
         $filters = $request->validated();
         $query = Tenant::query();
 
+        if (!empty($filters['search'] ?? null)) {
+            $query->where('name', 'like', $filters['search'].'%');
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }
@@ -82,6 +86,10 @@ class TenantController extends Controller
 
             if (!empty($filters['phone'] ?? null)) {
                 $query->where('phone', 'like', $filters['phone'].'%');
+            }
+
+            if (!empty($filters['search'] ?? null)) {
+                $this->applyTenantPrefixSearch($query, $filters['search'], ['name', 'email', 'phone']);
             }
 
             if (!empty($filters['status'] ?? null)) {

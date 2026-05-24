@@ -14,6 +14,7 @@ class WorkspaceSubscriptionPropertyIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:150'],
             'name' => ['nullable', 'string', 'max:150'],
             'status' => ['nullable', 'in:active,inactive'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

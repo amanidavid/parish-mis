@@ -6,9 +6,20 @@ use Illuminate\Support\Str;
 
 class JwtService
 {
+    public const APP_TOKEN_CONTEXT = 'app';
+    public const ADMIN_TOKEN_CONTEXT = 'admin';
+
     private function now(): int
     {
         return time();
+    }
+
+    private function tokenTtlSeconds(string $context = self::APP_TOKEN_CONTEXT): int
+    {
+        $configKey = $context === self::ADMIN_TOKEN_CONTEXT ? 'JWT_ADMIN_TTL' : 'JWT_TTL';
+        $ttl = (int) env($configKey, $context === self::ADMIN_TOKEN_CONTEXT ? 1800 : 900);
+
+        return max($ttl, 60);
     }
 
     private function jwtSecret(): string
@@ -45,9 +56,10 @@ class JwtService
         return $this->base64UrlEncode(hash_hmac('sha256', $headerPayload, $secret, true));
     }
 
-    public function issueTokenForSubject(string $subjectUuid, int $ttlSeconds = 900): array
+    public function issueTokenForSubject(string $subjectUuid, ?int $ttlSeconds = null): array
     {
         $now = $this->now();
+        $ttlSeconds ??= $this->tokenTtlSeconds();
         $payload = [
             'iss' => url('/'),
             'sub' => $subjectUuid,
@@ -65,9 +77,10 @@ class JwtService
         return [$jwt, $payload['exp'] - $now];
     }
 
-    public function issueTokenForModel(object $user, int $ttlSeconds = 900): array
+    public function issueTokenForModel(object $user, ?int $ttlSeconds = null): array
     {
         $now = $this->now();
+        $ttlSeconds ??= $this->tokenTtlSeconds();
         $payload = [
             'iss' => url('/'),
             'sub' => $user->uuid,
@@ -108,5 +121,15 @@ class JwtService
             }
         }
         return $payload;
+    }
+
+    public function issueAdminTokenForSubject(string $subjectUuid): array
+    {
+        return $this->issueTokenForSubject($subjectUuid, $this->tokenTtlSeconds(self::ADMIN_TOKEN_CONTEXT));
+    }
+
+    public function issueAdminTokenForModel(object $user): array
+    {
+        return $this->issueTokenForModel($user, $this->tokenTtlSeconds(self::ADMIN_TOKEN_CONTEXT));
     }
 }

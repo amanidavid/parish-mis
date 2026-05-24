@@ -191,6 +191,10 @@ class SubscriptionService
 
             $query = $this->propertyUsageQuery();
 
+            if (!empty($filters['search'] ?? null)) {
+                $query->where('properties.name', 'like', $filters['search'].'%');
+            }
+
             if (!empty($filters['name'] ?? null)) {
                 $query->where('properties.name', 'like', $filters['name'].'%');
             }

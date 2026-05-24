@@ -10,6 +10,7 @@ use App\Http\Requests\Api\App\V1\UpdateCustomerContractRequest;
 use App\Http\Resources\App\V1\CustomerContractResource;
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
+use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
 use App\Support\ApiMessages;
@@ -33,6 +34,14 @@ class CustomerContractController extends Controller
             ->with(['customer', 'unit.propertyFloor.property'])
             ->withCount('documents');
 
+        if (!empty($filters['property_uuid'] ?? null)) {
+            $property = $this->resolveModelByUuid(Property::class, $filters['property_uuid']);
+            if (!$property) {
+                return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
+            }
+            $query->whereHas('unit.propertyFloor', fn ($q) => $q->where('property_id', $property->id));
+        }
+
         if (!empty($filters['customer_uuid'] ?? null)) {
             $customer = $this->resolveModelByUuid(Customer::class, $filters['customer_uuid']);
             if (!$customer) {
@@ -53,6 +62,14 @@ class CustomerContractController extends Controller
 
         if (!empty($filters['status'] ?? null)) {
             $query->where('status', $filters['status']);
+        }
+
+        if (!empty($filters['search'] ?? null)) {
+            $query->where(function ($innerQuery) use ($filters) {
+                $innerQuery
+                    ->where('contract_number', 'like', $filters['search'].'%')
+                    ->orWhereHas('customer', fn ($customerQuery) => $customerQuery->where('display_name', 'like', $filters['search'].'%'));
+            });
         }
 
         if (!empty($filters['contract_number'] ?? null)) {

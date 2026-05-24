@@ -35,7 +35,7 @@ class AuthController extends Controller
             return ApiResponse::error('Access denied', ['auth' => ['System administrator access is required.']], 403);
         }
 
-        [$token, $expiresIn] = $this->jwt->issueTokenForSubject((string) $user->uuid);
+        [$token, $expiresIn] = $this->jwt->issueAdminTokenForSubject((string) $user->uuid);
 
         return ApiResponse::resource(new AdminSessionResource([
             'access_token' => $token,

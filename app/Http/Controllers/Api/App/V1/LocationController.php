@@ -29,6 +29,10 @@ class LocationController extends Controller
         $filters = $request->validated();
         $query = Country::query()->withCount('regions');
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }
@@ -58,6 +62,10 @@ class LocationController extends Controller
             }
 
             $query->where('country_id', $country->id);
+        }
+
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
         }
 
         if (!empty($filters['name'] ?? null)) {
@@ -98,6 +106,10 @@ class LocationController extends Controller
             $query->where('region_id', $region->id);
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }
@@ -136,6 +148,10 @@ class LocationController extends Controller
             }
 
             $query->where('district_id', $district->id);
+        }
+
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
         }
 
         if (!empty($filters['name'] ?? null)) {

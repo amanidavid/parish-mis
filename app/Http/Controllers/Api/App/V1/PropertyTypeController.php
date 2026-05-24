@@ -23,6 +23,10 @@ class PropertyTypeController extends Controller
         $filters = $request->validated();
         $query = PropertyType::query()->withCount('properties');
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }

@@ -14,6 +14,8 @@ class CustomerContractIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
+            'property_uuid' => ['nullable', 'uuid'],
             'customer_uuid' => ['nullable', 'uuid'],
             'unit_uuid' => ['nullable', 'uuid'],
             'status' => ['nullable', 'in:draft,active,expired,terminated,renewed'],

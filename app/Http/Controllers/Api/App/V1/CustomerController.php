@@ -56,6 +56,10 @@ class CustomerController extends Controller
             $query->where('status', $filters['status']);
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['display_name', 'email', 'phone']);
+        }
+
         if (!empty($filters['display_name'] ?? null)) {
             $query->where('display_name', 'like', $filters['display_name'].'%');
         }

@@ -14,6 +14,7 @@ class UnitIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'property_uuid' => ['nullable', 'uuid'],
             'property_floor_uuid' => ['nullable', 'uuid'],
             'status' => ['nullable', 'in:vacant,occupied,maintenance'],

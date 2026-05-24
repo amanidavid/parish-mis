@@ -72,6 +72,10 @@ class PropertyController extends Controller
             $query->where('ward_id', $ward->id);
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }

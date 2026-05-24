@@ -14,6 +14,7 @@ class TenantIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'name' => ['nullable', 'string', 'max:120'],
             'status' => ['nullable', 'in:active,suspended'],
             'provisioning_status' => ['nullable', 'in:pending,provisioning,ready,failed'],

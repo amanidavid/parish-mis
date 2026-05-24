@@ -14,6 +14,7 @@ class PropertyFloorIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'property_uuid' => ['nullable', 'uuid'],
             'name' => ['nullable', 'string', 'max:120'],
             'floor_number' => ['nullable', 'integer', 'min:0'],

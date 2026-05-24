@@ -12,10 +12,10 @@ class PropertyResource extends ApiJsonResource
         return [
             'uuid' => $this->uuid,
             'name' => $this->name,
-            'type' => $this->whenLoaded('type', fn () => [
+            'type' => $this->whenLoaded('type', fn () => $this->type ? [
                 'uuid' => $this->type->uuid,
                 'name' => $this->type->name,
-            ]),
+            ] : null),
             'address_line' => $this->address_line,
             'postal_code' => $this->postal_code,
             'location' => $this->whenLoaded('ward', fn () => [

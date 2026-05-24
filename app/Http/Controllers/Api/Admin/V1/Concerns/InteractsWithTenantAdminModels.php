@@ -7,6 +7,21 @@ use Illuminate\Database\Eloquent\Builder;
 
 trait InteractsWithTenantAdminModels
 {
+    protected function applyTenantPrefixSearch(Builder $query, ?string $search, array $columns): Builder
+    {
+        $search = trim((string) $search);
+
+        if ($search === '' || $columns === []) {
+            return $query;
+        }
+
+        return $query->where(function (Builder $innerQuery) use ($columns, $search) {
+            foreach ($columns as $column) {
+                $innerQuery->orWhere($column, 'like', $search.'%');
+            }
+        });
+    }
+
     protected function applyTenantSort(
         Builder $query,
         ?string $sort,

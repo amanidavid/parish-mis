@@ -44,6 +44,10 @@ class TenantUserController extends Controller
             $query->where('phone', 'like', $filters['phone'].'%');
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name', 'email', 'phone']);
+        }
+
         if (!empty($filters['status'] ?? null)) {
             $query->where('status', $filters['status']);
         }

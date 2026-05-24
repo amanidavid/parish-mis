@@ -53,6 +53,10 @@ class UnitController extends Controller
             $query->where('status', $filters['status']);
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['unit_number']);
+        }
+
         if (!empty($filters['unit_number'] ?? null)) {
             $query->where('unit_number', 'like', $filters['unit_number'].'%');
         }

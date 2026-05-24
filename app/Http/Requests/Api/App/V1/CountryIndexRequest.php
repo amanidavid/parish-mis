@@ -14,6 +14,7 @@ class CountryIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'search' => ['nullable', 'string', 'max:120'],
             'name' => ['nullable', 'string', 'max:120'],
             'status' => ['nullable', 'in:active,inactive'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

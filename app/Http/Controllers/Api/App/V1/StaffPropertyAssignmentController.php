@@ -43,6 +43,14 @@ class StaffPropertyAssignmentController extends Controller
             $query->where('user_id', $user->id);
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $query->where(function ($innerQuery) use ($filters) {
+                $innerQuery
+                    ->whereHas('user', fn ($userQuery) => $userQuery->where('name', 'like', $filters['search'].'%'))
+                    ->orWhereHas('property', fn ($propertyQuery) => $propertyQuery->where('name', 'like', $filters['search'].'%'));
+            });
+        }
+
         $this->applySort($query, $filters['sort'] ?? null, ['created_at'], 'created_at', 'desc');
         $assignments = $query->paginate((int) ($filters['per_page'] ?? 15));
 

@@ -34,6 +34,10 @@ class PropertyFloorController extends Controller
             $query->where('property_id', $property->id);
         }
 
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, $filters['search'], ['name']);
+        }
+
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }
