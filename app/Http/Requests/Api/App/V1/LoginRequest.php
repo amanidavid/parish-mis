@@ -15,6 +15,7 @@ class LoginRequest extends FormRequest
     {
         return [
             'workspace_uuid' => ['nullable', 'uuid'],
+            'country_code' => ['nullable', 'required_with:phone', 'string', 'min:1', 'max:10'],
             'phone' => ['nullable', 'required_without:email', 'string'],
             'email' => ['nullable', 'required_without:phone', 'email'],
             'password' => ['required', 'string', 'min:6'],

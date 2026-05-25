@@ -30,7 +30,7 @@ class LocationController extends Controller
         $query = Country::query()->withCount('regions');
 
         if (!empty($filters['search'] ?? null)) {
-            $this->applyPrefixSearch($query, $filters['search'], ['name']);
+            $this->applyPrefixSearch($query, $filters['search'], ['name', 'code', 'dial_code']);
         }
 
         if (!empty($filters['name'] ?? null)) {

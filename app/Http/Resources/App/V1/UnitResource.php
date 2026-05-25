@@ -12,6 +12,7 @@ class UnitResource extends ApiJsonResource
         return [
             'uuid' => $this->uuid,
             'unit_number' => $this->unit_number,
+            'description' => $this->description,
             'status' => $this->status,
             'property_floor' => $this->whenLoaded('propertyFloor', fn () => [
                 'uuid' => $this->propertyFloor->uuid,

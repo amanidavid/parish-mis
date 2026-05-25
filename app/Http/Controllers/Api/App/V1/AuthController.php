@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\V1\ChangePasswordRequest;
 use App\Http\Requests\Api\App\V1\ForgotPasswordRequest;
 use App\Http\Requests\Api\App\V1\LoginRequest;
 use App\Http\Requests\Api\App\V1\RegisterRequest;
@@ -40,13 +41,17 @@ class AuthController extends Controller
     public function register(RegisterRequest $request)
     {
         $data = $request->validated();
+        $phone = $this->composePhoneNumber($data['country_code'] ?? null, $data['phone'] ?? null);
+        $email = $this->normalizeEmail($data['email'] ?? null);
+        $username = $this->resolveRegistrationUsername($data['username'] ?? null, $data['name'], $phone);
 
         $exists = BaseUser::query()
-            ->where('username', $data['username'])
-            ->orWhere('phone', $data['phone'])
+            ->where('username', $username)
+            ->orWhere('phone', $phone)
             ->orWhere(function ($query) use ($data) {
-                if (!empty($data['email'])) {
-                    $query->where('email', $data['email']);
+                $email = $this->normalizeEmail($data['email'] ?? null);
+                if (!empty($email)) {
+                    $query->where('email', $email);
                 }
             })
             ->exists();
@@ -59,16 +64,18 @@ class AuthController extends Controller
             );
         }
 
-        [$baseUser, $workspace] = DB::connection('base')->transaction(function () use ($data) {
+        [$baseUser, $workspace] = DB::connection('base')->transaction(function () use ($data, $email, $phone, $username) {
             $baseUser = BaseUser::query()->create([
                 'uuid' => (string) Str::uuid(),
-                'username' => $data['username'],
+                'username' => $username,
                 'name' => $data['name'],
-                'phone' => $data['phone'],
-                'email' => $data['email'] ?? null,
+                'phone' => $phone,
+                'email' => $email,
                 'password' => Hash::make($data['password']),
                 'status' => 'active',
-                'meta' => [],
+                'meta' => [
+                    'country_code' => $this->normalizeCountryCode($data['country_code'] ?? null),
+                ],
             ]);
 
             $workspace = $this->workspaceService->createWorkspaceForUser(
@@ -213,6 +220,32 @@ class AuthController extends Controller
         return ApiResponse::success('Logged out');
     }
 
+    public function changePassword(ChangePasswordRequest $request)
+    {
+        $baseUser = request()->attributes->get('base_user') ?? request()->attributes->get('auth_user');
+        if (!$baseUser instanceof BaseUser) {
+            return ApiResponse::error('Unauthorized', ['token' => ['Unable to resolve authenticated user']], 401);
+        }
+
+        $data = $request->validated();
+
+        if (!Hash::check($data['current_password'], (string) $baseUser->password)) {
+            return ApiResponse::error(
+                'Password could not be changed.',
+                ['current_password' => ['The current password you entered is incorrect.']],
+                422
+            );
+        }
+
+        DB::connection('base')->transaction(function () use ($baseUser, $data) {
+            $baseUser->forceFill([
+                'password' => Hash::make($data['password']),
+            ])->save();
+        });
+
+        return ApiResponse::success('Password changed successfully.');
+    }
+
     private function tenantMemberships(int $baseUserId)
     {
         return DB::connection('base')->table('user_tenants')
@@ -231,6 +264,10 @@ class AuthController extends Controller
     private function resolveBaseUserForWorkspaceCredential(array $data, bool $failOnAmbiguous = true): ?BaseUser
     {
         $workspaceUuid = $data['workspace_uuid'] ?? null;
+        $phone = !empty($data['phone'] ?? null)
+            ? $this->composePhoneNumber($data['country_code'] ?? null, $data['phone'])
+            : null;
+        $email = $this->normalizeEmail($data['email'] ?? null);
 
         if (!empty($workspaceUuid)) {
             $workspace = Tenant::query()->where('uuid', $workspaceUuid)->first();
@@ -242,16 +279,16 @@ class AuthController extends Controller
                 ->select('users.*')
                 ->join('user_tenants', 'user_tenants.user_id', '=', 'users.id')
                 ->where('user_tenants.tenant_id', $workspace->id)
-                ->when(!empty($data['phone'] ?? null), fn ($query) => $query->where('users.phone', $data['phone']))
-                ->when(empty($data['phone'] ?? null), fn ($query) => $query->where('users.email', $data['email']))
+                ->when($phone !== null, fn ($query) => $query->where('users.phone', $phone))
+                ->when($phone === null && !empty($email), fn ($query) => $query->where('users.email', $email))
                 ->orderByDesc('user_tenants.is_owner')
                 ->first();
         }
 
         $query = BaseUser::query();
-        $query = !empty($data['phone'] ?? null)
-            ? $query->where('phone', $data['phone'])
-            : $query->where('email', $data['email']);
+        $query = $phone !== null
+            ? $query->where('phone', $phone)
+            : $query->where('email', $email);
 
         $count = (clone $query)->count();
         if ($count > 1 && $failOnAmbiguous) {
@@ -263,5 +300,70 @@ class AuthController extends Controller
         }
 
         return $query->first();
+    }
+
+    private function resolveRegistrationUsername(?string $username, string $name, string $phone): string
+    {
+        $username = $this->normalizeUsername($username);
+
+        if ($username !== null) {
+            return $username;
+        }
+
+        $base = Str::of($name)
+            ->lower()
+            ->replaceMatches('/[^a-z0-9]+/', '_')
+            ->trim('_')
+            ->toString();
+
+        if ($base === '') {
+            $base = 'user';
+        }
+
+        $phoneDigits = preg_replace('/\D+/', '', $phone);
+        $candidate = $base.'_'.substr($phoneDigits !== '' ? $phoneDigits : Str::random(6), -6);
+        $sequence = 1;
+
+        while (BaseUser::query()->where('username', $candidate)->exists()) {
+            $candidate = $base.'_'.$sequence;
+            $sequence++;
+        }
+
+        return $candidate;
+    }
+
+    private function composePhoneNumber(?string $countryCode, ?string $phone): string
+    {
+        $normalizedCountryCode = $this->normalizeCountryCode($countryCode);
+        $normalizedPhone = preg_replace('/\D+/', '', (string) $phone);
+        $normalizedPhone = ltrim((string) $normalizedPhone, '0');
+
+        return $normalizedCountryCode.($normalizedPhone !== '' ? $normalizedPhone : '');
+    }
+
+    private function normalizeCountryCode(?string $countryCode): string
+    {
+        $countryCode = preg_replace('/[^0-9+]/', '', (string) $countryCode);
+        $countryCode = trim((string) $countryCode);
+
+        if ($countryCode === '') {
+            return '';
+        }
+
+        return str_starts_with($countryCode, '+') ? $countryCode : '+'.$countryCode;
+    }
+
+    private function normalizeEmail(?string $email): ?string
+    {
+        $email = trim((string) $email);
+
+        return $email !== '' ? Str::lower($email) : null;
+    }
+
+    private function normalizeUsername(?string $username): ?string
+    {
+        $username = trim((string) $username);
+
+        return $username !== '' ? Str::lower($username) : null;
     }
 }
