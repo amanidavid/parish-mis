@@ -16,9 +16,9 @@ class Property extends BaseModel
         return $this->belongsTo(PropertyType::class, 'type_id');
     }
 
-    public function ward(): BelongsTo
+    public function district(): BelongsTo
     {
-        return $this->belongsTo(Ward::class);
+        return $this->belongsTo(District::class, 'district_id');
     }
 
     public function floors(): HasMany

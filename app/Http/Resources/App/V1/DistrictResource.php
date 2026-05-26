@@ -19,7 +19,6 @@ class DistrictResource extends JsonResource
                 'name' => $this->region->name,
                 'country_uuid' => $this->region->country?->uuid,
             ]),
-            'wards_count' => $this->whenCounted('wards'),
         ];
     }
 }

@@ -7,15 +7,12 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\CountryIndexRequest;
 use App\Http\Requests\Api\App\V1\DistrictIndexRequest;
 use App\Http\Requests\Api\App\V1\RegionIndexRequest;
-use App\Http\Requests\Api\App\V1\WardIndexRequest;
 use App\Http\Resources\App\V1\CountryResource;
 use App\Http\Resources\App\V1\DistrictResource;
 use App\Http\Resources\App\V1\RegionResource;
-use App\Http\Resources\App\V1\WardResource;
 use App\Models\Tenant\Country;
 use App\Models\Tenant\District;
 use App\Models\Tenant\Region;
-use App\Models\Tenant\Ward;
 use App\Support\ApiResponse;
 
 class LocationController extends Controller
@@ -90,8 +87,7 @@ class LocationController extends Controller
             ->with([
                 'region:id,uuid,name,country_id',
                 'region.country:id,uuid',
-            ])
-            ->withCount('wards');
+            ]);
 
         if (!empty($filters['country_uuid'] ?? null)) {
             $query->whereHas('region.country', fn ($innerQuery) => $innerQuery->where('uuid', $filters['country_uuid']));
@@ -121,49 +117,5 @@ class LocationController extends Controller
         $districts = $query->orderBy('name')->paginate((int) ($filters['per_page'] ?? 100));
 
         return ApiResponse::resource(DistrictResource::collection($districts), 'Districts list');
-    }
-
-    public function wards(WardIndexRequest $request)
-    {
-        $this->authorize('viewAny', Country::class);
-
-        $filters = $request->validated();
-        $query = Ward::query()->with([
-            'district:id,uuid,name,region_id',
-            'district.region:id,uuid',
-        ]);
-
-        if (!empty($filters['country_uuid'] ?? null)) {
-            $query->whereHas('district.region.country', fn ($innerQuery) => $innerQuery->where('uuid', $filters['country_uuid']));
-        }
-
-        if (!empty($filters['region_uuid'] ?? null)) {
-            $query->whereHas('district.region', fn ($innerQuery) => $innerQuery->where('uuid', $filters['region_uuid']));
-        }
-
-        if (!empty($filters['district_uuid'] ?? null)) {
-            $district = $this->resolveModelByUuid(District::class, $filters['district_uuid']);
-            if (!$district) {
-                return ApiResponse::error('District not found', ['district_uuid' => ['Invalid district identifier']], 422);
-            }
-
-            $query->where('district_id', $district->id);
-        }
-
-        if (!empty($filters['search'] ?? null)) {
-            $this->applyPrefixSearch($query, $filters['search'], ['name']);
-        }
-
-        if (!empty($filters['name'] ?? null)) {
-            $query->where('name', 'like', $filters['name'].'%');
-        }
-
-        if (!empty($filters['status'] ?? null)) {
-            $query->where('status', $filters['status']);
-        }
-
-        $wards = $query->orderBy('name')->paginate((int) ($filters['per_page'] ?? 100));
-
-        return ApiResponse::resource(WardResource::collection($wards), 'Wards list');
     }
 }

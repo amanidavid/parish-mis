@@ -18,23 +18,19 @@ class PropertyResource extends ApiJsonResource
             ] : null),
             'address_line' => $this->address_line,
             'postal_code' => $this->postal_code,
-            'location' => $this->whenLoaded('ward', fn () => [
-                'ward' => $this->ward ? [
-                    'uuid' => $this->ward->uuid,
-                    'name' => $this->ward->name,
+            'location' => $this->whenLoaded('district', fn () => [
+                'district' => $this->district ? [
+                    'uuid' => $this->district->uuid,
+                    'name' => $this->district->name,
                 ] : null,
-                'district' => $this->ward?->district ? [
-                    'uuid' => $this->ward->district->uuid,
-                    'name' => $this->ward->district->name,
+                'region' => $this->district?->region ? [
+                    'uuid' => $this->district->region->uuid,
+                    'name' => $this->district->region->name,
                 ] : null,
-                'region' => $this->ward?->district?->region ? [
-                    'uuid' => $this->ward->district->region->uuid,
-                    'name' => $this->ward->district->region->name,
-                ] : null,
-                'country' => $this->ward?->district?->region?->country ? [
-                    'uuid' => $this->ward->district->region->country->uuid,
-                    'name' => $this->ward->district->region->country->name,
-                    'code' => $this->ward->district->region->country->code,
+                'country' => $this->district?->region?->country ? [
+                    'uuid' => $this->district->region->country->uuid,
+                    'name' => $this->district->region->country->name,
+                    'code' => $this->district->region->country->code,
                 ] : null,
             ]),
             'status' => $this->status,

@@ -84,7 +84,6 @@ Route::prefix('v1')->group(function () {
                     Route::get('countries', [LocationController::class, 'countries']);
                     Route::get('regions', [LocationController::class, 'regions']);
                     Route::get('districts', [LocationController::class, 'districts']);
-                    Route::get('wards', [LocationController::class, 'wards']);
                 });
                 Route::apiResource('property-types', PropertyTypeController::class);
                 Route::apiResource('properties', PropertyController::class);

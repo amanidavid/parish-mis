@@ -19,7 +19,6 @@ class PropertyIndexRequest extends FormRequest
             'country_uuid' => ['nullable', 'uuid'],
             'region_uuid' => ['nullable', 'uuid'],
             'district_uuid' => ['nullable', 'uuid'],
-            'ward_uuid' => ['nullable', 'uuid'],
             'name' => ['nullable', 'string', 'max:150'],
             'status' => ['nullable', 'in:active,inactive'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

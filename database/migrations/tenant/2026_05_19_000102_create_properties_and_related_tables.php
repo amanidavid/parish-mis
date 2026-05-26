@@ -82,7 +82,7 @@ return new class extends Migration {
             $table->char('uuid', 36)->unique();
             $table->string('name');
             $table->foreignId('type_id')->nullable()->constrained('property_types')->nullOnDelete();
-            $table->foreignId('ward_id')->nullable()->constrained('wards')->nullOnDelete();
+            $table->foreignId('district_id')->nullable()->constrained('districts')->nullOnDelete();
             $table->string('address_line')->nullable();
             $table->string('postal_code', 20)->nullable();
             $table->enum('status', ['active','inactive'])->default('active')->index();
@@ -90,7 +90,7 @@ return new class extends Migration {
             $table->unique(['name']);
 
             $table->index(['type_id', 'status']);
-            $table->index(['ward_id', 'status']);
+            $table->index(['district_id', 'status']);
             $table->index(['status', 'name']);
             });
         }
