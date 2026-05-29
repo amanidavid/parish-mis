@@ -47,7 +47,17 @@ class UnitController extends Controller
                 return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
             }
 
-            $query->whereHas('propertyFloor', fn ($innerQuery) => $innerQuery->where('property_id', $property->id));
+            /* Resolve floor IDs once — avoids nested whereHas subquery */
+            $floorIds = PropertyFloor::query()
+                ->where('property_id', $property->id)
+                ->pluck('id')
+                ->all();
+
+            if ($floorIds === []) {
+                return ApiResponse::resource(UnitResource::collection(collect()), ApiMessages::listRetrieved('units'));
+            }
+
+            $query->whereIn('property_floor_id', $floorIds);
         }
 
         if (!empty($filters['property_floor_uuid'] ?? null)) {

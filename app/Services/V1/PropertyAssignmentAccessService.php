@@ -34,10 +34,14 @@ class PropertyAssignmentAccessService
     private function bypassPermissionExists(): bool
     {
         if ($this->bypassPermissionExists === null) {
-            $this->bypassPermissionExists = Permission::query()
-                ->where('guard_name', 'api')
-                ->where('name', self::BYPASS_PERMISSION)
-                ->exists();
+            $this->bypassPermissionExists = \Illuminate\Support\Facades\Cache::remember(
+                'permission_exists:' . self::BYPASS_PERMISSION,
+                3600,
+                fn () => Permission::query()
+                    ->where('guard_name', 'api')
+                    ->where('name', self::BYPASS_PERMISSION)
+                    ->exists()
+            );
         }
 
         return $this->bypassPermissionExists;
@@ -106,9 +110,19 @@ class PropertyAssignmentAccessService
 
         $ids = $this->assignedPropertyIds($user);
 
-        return $ids === []
+        if ($ids === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        /* Resolve floor IDs once per request — avoids nested whereHas subquery on units */
+        $floorIds = PropertyFloor::query()
+            ->whereIn('property_id', $ids)
+            ->pluck('id')
+            ->all();
+
+        return $floorIds === []
             ? $query->whereRaw('1 = 0')
-            : $query->whereHas('propertyFloor', fn (Builder $innerQuery) => $innerQuery->whereIn('property_id', $ids));
+            : $query->whereIn('property_floor_id', $floorIds);
     }
 
     public function scopeContracts(Builder $query, User $user): Builder
@@ -119,9 +133,21 @@ class PropertyAssignmentAccessService
 
         $ids = $this->assignedPropertyIds($user);
 
-        return $ids === []
-            ? $query->whereRaw('1 = 0')
-            : $query->whereHas('unit.propertyFloor', fn (Builder $innerQuery) => $innerQuery->whereIn('property_id', $ids));
+        if ($ids === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        /* Resolve floor IDs once — avoids nested whereHas subquery on contracts */
+        $floorIds = PropertyFloor::query()
+            ->whereIn('property_id', $ids)
+            ->pluck('id')
+            ->all();
+
+        if ($floorIds === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas('unit', fn (Builder $innerQuery) => $innerQuery->whereIn('property_floor_id', $floorIds));
     }
 
     public function scopeCustomers(Builder $query, User $user): Builder
@@ -132,9 +158,21 @@ class PropertyAssignmentAccessService
 
         $ids = $this->assignedPropertyIds($user);
 
-        return $ids === []
-            ? $query->whereRaw('1 = 0')
-            : $query->whereHas('contracts.unit.propertyFloor', fn (Builder $innerQuery) => $innerQuery->whereIn('property_id', $ids));
+        if ($ids === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        /* Resolve floor IDs once — avoids triple-nested whereHas subquery */
+        $floorIds = PropertyFloor::query()
+            ->whereIn('property_id', $ids)
+            ->pluck('id')
+            ->all();
+
+        if ($floorIds === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereHas('contracts.unit', fn (Builder $innerQuery) => $innerQuery->whereIn('property_floor_id', $floorIds));
     }
 
     public function canAccessPropertyModel(User $user, Property $property): bool
