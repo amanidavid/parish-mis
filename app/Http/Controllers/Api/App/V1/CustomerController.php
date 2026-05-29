@@ -9,7 +9,11 @@ use App\Http\Requests\Api\App\V1\StoreCustomerRequest;
 use App\Http\Requests\Api\App\V1\UpdateCustomerRequest;
 use App\Http\Resources\App\V1\CustomerResource;
 use App\Models\Tenant\Customer;
+use App\Models\Tenant\Property;
+use App\Models\Tenant\Unit;
+use App\Models\Tenant\User as TenantUser;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
@@ -19,7 +23,10 @@ class CustomerController extends Controller
 {
     use InteractsWithTenantModels;
 
-    public function __construct(private CustomerContractRuleService $ruleService)
+    public function __construct(
+        private CustomerContractRuleService $ruleService,
+        private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+    )
     {
     }
 
@@ -28,10 +35,15 @@ class CustomerController extends Controller
         $this->authorize('viewAny', Customer::class);
 
         $filters = $request->validated();
+        $tenantUser = request()->user();
         $query = Customer::query()->withCount('contracts');
 
+        if ($tenantUser instanceof TenantUser) {
+            $this->propertyAssignmentAccessService->scopeCustomers($query, $tenantUser);
+        }
+
         if (!empty($filters['unit_uuid'] ?? null)) {
-            $unit = $this->resolveModelByUuid(\App\Models\Tenant\Unit::class, $filters['unit_uuid']);
+            $unit = $this->resolveModelByUuid(Unit::class, $filters['unit_uuid']);
             if (!$unit) {
                 return ApiResponse::error('Unit not found', ['unit_uuid' => ['Invalid unit identifier']], 422);
             }
@@ -40,7 +52,7 @@ class CustomerController extends Controller
         }
 
         if (!empty($filters['property_uuid'] ?? null)) {
-            $property = $this->resolveModelByUuid(\App\Models\Tenant\Property::class, $filters['property_uuid']);
+            $property = $this->resolveModelByUuid(Property::class, $filters['property_uuid']);
             if (!$property) {
                 return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
             }

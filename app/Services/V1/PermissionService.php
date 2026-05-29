@@ -4,8 +4,10 @@ namespace App\Services\V1;
 
 use App\Support\PermissionLabel;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\PermissionRegistrar;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 class PermissionService
 {
@@ -41,6 +43,77 @@ class PermissionService
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         return Permission::query()->findOrFail($permission->id);
+    }
+
+    /** Create or update an API role and optionally attach the provided permissions in one transaction. */
+    public function createRole(string $name, array $permissionIds = []): Role
+    {
+        return DB::transaction(function () use ($name, $permissionIds) {
+            $normalized = strtolower(trim($name));
+
+            $role = Role::query()->firstOrNew([
+                'name' => $normalized,
+                'guard_name' => 'api',
+            ]);
+
+            $role->save();
+
+            if ($permissionIds !== []) {
+                $permissions = $this->findByIds($permissionIds);
+
+                if ($permissions->count() !== count($permissionIds)) {
+                    throw ValidationException::withMessages([
+                        'permission_ids' => ['One or more permissions are invalid.'],
+                    ]);
+                }
+
+                $role->syncPermissions($permissions);
+            }
+
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+
+            return Role::query()
+                ->where('guard_name', 'api')
+                ->withCount('permissions')
+                ->with(['permissions' => fn ($permissionQuery) => $permissionQuery->orderBy('module')->orderBy('name')])
+                ->findOrFail($role->id);
+        });
+    }
+
+    /** Delete an API role, clear its assignments, and remove only permissions that become fully orphaned. */
+    public function deleteRole(int $roleId): void
+    {
+        DB::transaction(function () use ($roleId) {
+            $role = Role::query()
+                ->where('guard_name', 'api')
+                ->findOrFail($roleId);
+
+            $attachedPermissionIds = DB::table('role_has_permissions')
+                ->where('role_id', $role->id)
+                ->pluck('permission_id')
+                ->all();
+
+            $role->delete();
+
+            if ($attachedPermissionIds !== []) {
+                DB::table('permissions')
+                    ->where('guard_name', 'api')
+                    ->whereIn('id', $attachedPermissionIds)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
+                            ->from('role_has_permissions')
+                            ->whereColumn('role_has_permissions.permission_id', 'permissions.id');
+                    })
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
+                            ->from('model_has_permissions')
+                            ->whereColumn('model_has_permissions.permission_id', 'permissions.id');
+                    })
+                    ->delete();
+            }
+
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+        });
     }
 
     public function backfillModules(): void

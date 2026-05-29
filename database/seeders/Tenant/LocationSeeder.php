@@ -150,9 +150,10 @@ class LocationSeeder extends Seeder
 
             $payload[] = [
                 'legacy_id' => $legacyId,
-                'uuid' => (string) Str::uuid(),
+                'uuid' => $this->stableLocationUuid('countries', $legacyId),
                 'name' => $name,
                 'dial_code' => $this->normalizeText($record['dial_code'] ?? null),
+                'dial_code_search' => $this->normalizeDialCode($record['dial_code'] ?? null),
                 'code' => $this->normalizeCode($record['code'] ?? null),
                 'status' => 'active',
                 'created_at' => $this->normalizeTimestamp($record['created_at'] ?? null, $timestamp),
@@ -160,7 +161,7 @@ class LocationSeeder extends Seeder
             ];
         }
 
-        $this->upsertByLegacyId('countries', $payload, ['name', 'dial_code', 'code', 'status', 'updated_at']);
+        $this->upsertByLegacyId('countries', $payload, ['uuid', 'name', 'dial_code', 'dial_code_search', 'code', 'status', 'updated_at']);
 
         return Country::query()
             ->whereIn('legacy_id', array_column($payload, 'legacy_id'))
@@ -195,7 +196,7 @@ class LocationSeeder extends Seeder
 
             $payload[] = [
                 'legacy_id' => $legacyId,
-                'uuid' => (string) Str::uuid(),
+                'uuid' => $this->stableLocationUuid('regions', $legacyId),
                 'country_id' => $countryId,
                 'name' => $name,
                 'post_code' => $this->nullableInt($record['post_code'] ?? null),
@@ -205,7 +206,7 @@ class LocationSeeder extends Seeder
             ];
         }
 
-        $this->upsertByLegacyId('regions', $payload, ['country_id', 'name', 'post_code', 'status', 'updated_at']);
+        $this->upsertByLegacyId('regions', $payload, ['uuid', 'country_id', 'name', 'post_code', 'status', 'updated_at']);
 
         return Region::query()
             ->whereIn('legacy_id', array_column($payload, 'legacy_id'))
@@ -240,7 +241,7 @@ class LocationSeeder extends Seeder
 
             $payload[] = [
                 'legacy_id' => $legacyId,
-                'uuid' => (string) Str::uuid(),
+                'uuid' => $this->stableLocationUuid('districts', $legacyId),
                 'region_id' => $regionId,
                 'name' => $name,
                 'post_code' => $this->nullableInt($record['post_code'] ?? null),
@@ -250,7 +251,7 @@ class LocationSeeder extends Seeder
             ];
         }
 
-        $this->upsertByLegacyId('districts', $payload, ['region_id', 'name', 'post_code', 'status', 'updated_at']);
+        $this->upsertByLegacyId('districts', $payload, ['uuid', 'region_id', 'name', 'post_code', 'status', 'updated_at']);
 
         return District::query()
             ->whereIn('legacy_id', array_column($payload, 'legacy_id'))
@@ -284,7 +285,7 @@ class LocationSeeder extends Seeder
 
             $payload[] = [
                 'legacy_id' => $legacyId,
-                'uuid' => (string) Str::uuid(),
+                'uuid' => $this->stableLocationUuid('wards', $legacyId),
                 'district_id' => $districtId,
                 'name' => $name,
                 'post_code' => $this->nullableInt($record['post_code'] ?? null),
@@ -294,7 +295,7 @@ class LocationSeeder extends Seeder
             ];
         }
 
-        $this->upsertByLegacyId('wards', $payload, ['district_id', 'name', 'post_code', 'status', 'updated_at']);
+        $this->upsertByLegacyId('wards', $payload, ['uuid', 'district_id', 'name', 'post_code', 'status', 'updated_at']);
     }
 
     /**
@@ -335,6 +336,27 @@ class LocationSeeder extends Seeder
         $code = $this->normalizeText($value);
 
         return $code === null ? null : Str::upper($code);
+    }
+
+    private function normalizeDialCode(mixed $value): ?string
+    {
+        $dialCode = preg_replace('/\D+/', '', (string) $value);
+
+        return $dialCode !== '' ? $dialCode : null;
+    }
+
+    private function stableLocationUuid(string $dataset, int $legacyId): string
+    {
+        $hash = md5("parish-mis.locations.{$dataset}.{$legacyId}");
+
+        return sprintf(
+            '%08s-%04s-%04s-%04s-%012s',
+            substr($hash, 0, 8),
+            substr($hash, 8, 4),
+            substr($hash, 12, 4),
+            substr($hash, 16, 4),
+            substr($hash, 20, 12)
+        );
     }
 
     private function nullableInt(mixed $value): ?int

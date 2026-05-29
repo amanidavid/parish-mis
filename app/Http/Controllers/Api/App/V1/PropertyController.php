@@ -8,19 +8,27 @@ use App\Http\Requests\Api\App\V1\PropertyIndexRequest;
 use App\Http\Requests\Api\App\V1\StorePropertyRequest;
 use App\Http\Requests\Api\App\V1\UpdatePropertyRequest;
 use App\Http\Resources\App\V1\PropertyResource;
+use App\Models\Tenant\Country;
 use App\Models\Tenant\District;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyType;
 use App\Models\Tenant\Region;
+use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenant\Ward;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
 class PropertyController extends Controller
 {
     use InteractsWithTenantModels;
 
-    public function __construct(private SubscriptionService $subscriptionService)
+    public function __construct(
+        private SubscriptionService $subscriptionService,
+        private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+    )
     {
     }
 
@@ -29,7 +37,14 @@ class PropertyController extends Controller
         $this->authorize('viewAny', Property::class);
 
         $filters = $request->validated();
-        $query = Property::query()->with(['type', 'district.region.country'])->withCount(['floors', 'units']);
+        $tenantUser = request()->user();
+        $query = Property::query()
+            ->with(['type', 'country', 'region.country', 'district.region.country', 'ward'])
+            ->withCount(['floors', 'units']);
+
+        if ($tenantUser instanceof TenantUser) {
+            $this->propertyAssignmentAccessService->scopeProperties($query, $tenantUser, 'properties.id');
+        }
 
         if (!empty($filters['type_uuid'] ?? null)) {
             $type = $this->resolveModelByUuid(PropertyType::class, $filters['type_uuid']);
@@ -41,7 +56,12 @@ class PropertyController extends Controller
         }
 
         if (!empty($filters['country_uuid'] ?? null)) {
-            $query->whereHas('district.region.country', fn ($innerQuery) => $innerQuery->where('uuid', $filters['country_uuid']));
+            $country = $this->resolveModelByUuid(Country::class, $filters['country_uuid']);
+            if (!$country) {
+                return ApiResponse::error('Country not found', ['country_uuid' => ['Invalid country identifier']], 422);
+            }
+
+            $query->where('country_id', $country->id);
         }
 
         if (!empty($filters['region_uuid'] ?? null)) {
@@ -50,7 +70,7 @@ class PropertyController extends Controller
                 return ApiResponse::error('Region not found', ['region_uuid' => ['Invalid region identifier']], 422);
             }
 
-            $query->whereHas('district.region', fn ($innerQuery) => $innerQuery->whereKey($region->id));
+            $query->where('region_id', $region->id);
         }
 
         if (!empty($filters['district_uuid'] ?? null)) {
@@ -60,6 +80,15 @@ class PropertyController extends Controller
             }
 
             $query->where('district_id', $district->id);
+        }
+
+        if (!empty($filters['ward_uuid'] ?? null)) {
+            $ward = $this->resolveModelByUuid(Ward::class, $filters['ward_uuid']);
+            if (!$ward) {
+                return ApiResponse::error('Ward not found', ['ward_uuid' => ['Invalid ward identifier']], 422);
+            }
+
+            $query->where('ward_id', $ward->id);
         }
 
         if (!empty($filters['search'] ?? null)) {
@@ -87,19 +116,16 @@ class PropertyController extends Controller
 
         $data = $request->validated();
         $type = null;
-        $district = null;
+        $location = null;
         if (!empty($data['type_uuid'] ?? null)) {
             $type = $this->resolveModelByUuid(PropertyType::class, $data['type_uuid']);
             if (!$type) {
                 return ApiResponse::error('Property type not found', ['type_uuid' => ['Invalid property type identifier']], 422);
             }
         }
-
-        if (!empty($data['district_uuid'] ?? null)) {
-            $district = $this->resolveModelByUuid(District::class, $data['district_uuid']);
-            if (!$district) {
-                return ApiResponse::error('District not found', ['district_uuid' => ['Invalid district identifier']], 422);
-            }
+        $location = $this->resolvePropertyLocation($data);
+        if ($location instanceof JsonResponse) {
+            return $location;
         }
 
         $exists = Property::query()->where('name', $data['name'])->exists();
@@ -111,7 +137,10 @@ class PropertyController extends Controller
         $property = DB::transaction(fn () => Property::query()->create([
             'name' => trim($data['name']),
             'type_id' => $type?->id,
-            'district_id' => $district?->id,
+            'country_id' => $location['country']?->id,
+            'region_id' => $location['region']?->id,
+            'district_id' => $location['district']?->id,
+            'ward_id' => $location['ward']?->id,
             'address_line' => $data['address_line'] ?? null,
             'postal_code' => $data['postal_code'] ?? null,
             'status' => $data['status'] ?? 'active',
@@ -119,7 +148,7 @@ class PropertyController extends Controller
 
         $this->syncWorkspaceUsage();
 
-        return ApiResponse::resource(new PropertyResource($property->load(['type', 'district.region.country'])->loadCount(['floors', 'units'])), 'Property created', 201);
+        return ApiResponse::resource(new PropertyResource($property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])), 'Property created', 201);
     }
 
     public function show(Property $property)
@@ -127,7 +156,7 @@ class PropertyController extends Controller
         $this->authorize('view', $property);
 
         return ApiResponse::resource(
-            new PropertyResource($property->load(['type', 'district.region.country'])->loadCount(['floors', 'units'])),
+            new PropertyResource($property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])),
             'Property details'
         );
     }
@@ -139,7 +168,10 @@ class PropertyController extends Controller
 
         $data = $request->validated();
         $typeId = $property->type_id;
+        $countryId = $property->country_id;
+        $regionId = $property->region_id;
         $districtId = $property->district_id;
+        $wardId = $property->ward_id;
 
         if (array_key_exists('type_uuid', $data)) {
             if ($data['type_uuid'] === null) {
@@ -154,18 +186,33 @@ class PropertyController extends Controller
             }
         }
 
-        if (array_key_exists('district_uuid', $data)) {
-            if ($data['district_uuid'] === null) {
-                $districtId = null;
-            } else {
-                $district = $this->resolveModelByUuid(District::class, $data['district_uuid']);
-                if (!$district) {
-                    return ApiResponse::error('District not found', ['district_uuid' => ['Invalid district identifier']], 422);
-                }
+        $countryChanged = array_key_exists('country_uuid', $data);
+        $regionChanged = array_key_exists('region_uuid', $data);
+        $districtChanged = array_key_exists('district_uuid', $data);
+        $wardChanged = array_key_exists('ward_uuid', $data);
 
-                $districtId = $district->id;
-            }
+        $locationInput = [
+            'country_uuid' => $countryChanged ? $data['country_uuid'] : $property->country?->uuid,
+            'region_uuid' => $regionChanged
+                ? $data['region_uuid']
+                : ($countryChanged ? null : $property->region?->uuid),
+            'district_uuid' => $districtChanged
+                ? $data['district_uuid']
+                : (($countryChanged || $regionChanged) ? null : $property->district?->uuid),
+            'ward_uuid' => $wardChanged
+                ? $data['ward_uuid']
+                : (($countryChanged || $regionChanged || $districtChanged) ? null : $property->ward?->uuid),
+        ];
+
+        $location = $this->resolvePropertyLocation($locationInput);
+        if ($location instanceof JsonResponse) {
+            return $location;
         }
+
+        $countryId = $location['country']?->id;
+        $regionId = $location['region']?->id;
+        $districtId = $location['district']?->id;
+        $wardId = $location['ward']?->id;
 
         $name = isset($data['name']) ? trim($data['name']) : $property->name;
         $exists = Property::query()
@@ -177,11 +224,14 @@ class PropertyController extends Controller
             return ApiResponse::error('A property with this name already exists', ['name' => ['Duplicate property name']], 422);
         }
 
-        DB::transaction(function () use ($property, $name, $typeId, $districtId, $data) {
+        DB::transaction(function () use ($property, $name, $typeId, $countryId, $regionId, $districtId, $wardId, $data) {
             $property->fill([
                 'name' => $name,
                 'type_id' => $typeId,
+                'country_id' => $countryId,
+                'region_id' => $regionId,
                 'district_id' => $districtId,
+                'ward_id' => $wardId,
                 'address_line' => array_key_exists('address_line', $data) ? $data['address_line'] : $property->address_line,
                 'postal_code' => array_key_exists('postal_code', $data) ? $data['postal_code'] : $property->postal_code,
                 'status' => $data['status'] ?? $property->status,
@@ -189,7 +239,7 @@ class PropertyController extends Controller
         });
 
         return ApiResponse::resource(
-            new PropertyResource($property->fresh()->load(['type', 'district.region.country'])->loadCount(['floors', 'units'])),
+            new PropertyResource($property->fresh()->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])),
             'Property updated'
         );
     }
@@ -222,5 +272,176 @@ class PropertyController extends Controller
         if ($tenant instanceof \App\Models\Tenancy\Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
         }
+    }
+
+    private function validatePropertyLocationHierarchy(
+        ?Country $country,
+        ?Region $region,
+        ?District $district,
+        ?Ward $ward
+    ): ?JsonResponse {
+        if ($region && $country && $region->country_id !== $country->id) {
+            return ApiResponse::error(
+                'Region does not belong to the selected country',
+                ['region_uuid' => ['The selected region does not belong to the selected country.']],
+                422
+            );
+        }
+
+        if ($district && $region && $district->region_id !== $region->id) {
+            return ApiResponse::error(
+                'District does not belong to the selected region',
+                ['district_uuid' => ['The selected district does not belong to the selected region.']],
+                422
+            );
+        }
+
+        if ($district && $country && $district->region?->country_id !== $country->id) {
+            return ApiResponse::error(
+                'District does not belong to the selected country',
+                ['district_uuid' => ['The selected district does not belong to the selected country.']],
+                422
+            );
+        }
+
+        if ($ward && $district && $ward->district_id !== $district->id) {
+            return ApiResponse::error(
+                'Ward does not belong to the selected district',
+                ['ward_uuid' => ['The selected ward does not belong to the selected district.']],
+                422
+            );
+        }
+
+        if ($ward && $region && $ward->district?->region_id !== $region->id) {
+            return ApiResponse::error(
+                'Ward does not belong to the selected region',
+                ['ward_uuid' => ['The selected ward does not belong to the selected region.']],
+                422
+            );
+        }
+
+        if ($ward && $country && $ward->district?->region?->country_id !== $country->id) {
+            return ApiResponse::error(
+                'Ward does not belong to the selected country',
+                ['ward_uuid' => ['The selected ward does not belong to the selected country.']],
+                422
+            );
+        }
+
+        return null;
+    }
+
+    private function resolvePropertyLocation(array $data): array|JsonResponse
+    {
+        $country = null;
+        $region = null;
+        $district = null;
+        $ward = null;
+
+        if (!empty($data['country_uuid'] ?? null)) {
+            $country = $this->resolveModelByUuid(Country::class, $data['country_uuid']);
+            if (!$country) {
+                return ApiResponse::error('Country not found', ['country_uuid' => ['Invalid country identifier']], 422);
+            }
+        }
+
+        if (!empty($data['region_uuid'] ?? null)) {
+            $region = Region::query()
+                ->select(['id', 'uuid', 'country_id', 'name'])
+                ->with('country:id,uuid,name,code')
+                ->where('uuid', $data['region_uuid'])
+                ->first();
+
+            if (!$region) {
+                return ApiResponse::error('Region not found', ['region_uuid' => ['Invalid region identifier']], 422);
+            }
+
+            $country ??= $region->country;
+        }
+
+        if (!empty($data['district_uuid'] ?? null)) {
+            $district = District::query()
+                ->select(['id', 'uuid', 'region_id', 'name'])
+                ->with('region:id,uuid,country_id,name', 'region.country:id,uuid,name,code')
+                ->where('uuid', $data['district_uuid'])
+                ->first();
+
+            if (!$district) {
+                return ApiResponse::error('District not found', ['district_uuid' => ['Invalid district identifier']], 422);
+            }
+
+            $region ??= $district->region;
+            $country ??= $district->region?->country;
+        }
+
+        if (!empty($data['ward_uuid'] ?? null)) {
+            $ward = Ward::query()
+                ->select(['id', 'uuid', 'district_id', 'name'])
+                ->with('district:id,uuid,region_id,name', 'district.region:id,uuid,country_id,name', 'district.region.country:id,uuid,name,code')
+                ->where('uuid', $data['ward_uuid'])
+                ->first();
+
+            if (!$ward) {
+                return ApiResponse::error('Ward not found', ['ward_uuid' => ['Invalid ward identifier']], 422);
+            }
+
+            $district ??= $ward->district;
+            $region ??= $ward->district?->region;
+            $country ??= $ward->district?->region?->country;
+        }
+
+        $hierarchyValidation = $this->validatePropertyLocationHierarchy($country, $region, $district, $ward);
+        if ($hierarchyValidation !== null) {
+            return $hierarchyValidation;
+        }
+
+        $requiredLevelValidation = $this->validateRequiredLocationDepth($country, $region, $district, $ward);
+        if ($requiredLevelValidation !== null) {
+            return $requiredLevelValidation;
+        }
+
+        return [
+            'country' => $country,
+            'region' => $region,
+            'district' => $district,
+            'ward' => $ward,
+        ];
+    }
+
+    private function validateRequiredLocationDepth(
+        ?Country $country,
+        ?Region $region,
+        ?District $district,
+        ?Ward $ward
+    ): ?JsonResponse {
+        if (!$country) {
+            return null;
+        }
+
+        if (!$region && Region::query()->where('country_id', $country->id)->exists()) {
+            return ApiResponse::error(
+                'Property location is incomplete',
+                ['region_uuid' => ['Select a region for the selected country.']],
+                422
+            );
+        }
+
+        if ($region && !$district && District::query()->where('region_id', $region->id)->exists()) {
+            return ApiResponse::error(
+                'Property location is incomplete',
+                ['district_uuid' => ['Select a district for the selected region.']],
+                422
+            );
+        }
+
+        if ($district && !$ward && Ward::query()->where('district_id', $district->id)->exists()) {
+            return ApiResponse::error(
+                'Property location is incomplete',
+                ['ward_uuid' => ['Select a ward for the selected district.']],
+                422
+            );
+        }
+
+        return null;
     }
 }

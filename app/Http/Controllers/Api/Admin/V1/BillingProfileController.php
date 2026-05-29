@@ -24,6 +24,7 @@ class BillingProfileController extends Controller
     {
     }
 
+    /** List billing profiles for admin management screens with filterable pricing metadata. */
     public function index(BillingProfileIndexRequest $request)
     {
         $filters = $request->validated();
@@ -50,6 +51,7 @@ class BillingProfileController extends Controller
         return ApiResponse::resource(BillingProfileResource::collection($profiles), 'Billing profiles retrieved successfully.');
     }
 
+    /** Create a reusable billing profile that can later be assigned to workspaces. */
     public function store(StoreBillingProfileRequest $request)
     {
         $data = $request->validated();
@@ -79,6 +81,7 @@ class BillingProfileController extends Controller
         return ApiResponse::resource(new BillingProfileResource($profile->loadCount('rules')), 'Billing profile created successfully.', 201);
     }
 
+    /** Return one billing profile together with its rule count for detail screens. */
     public function show(BillingProfile $billingProfile)
     {
         return ApiResponse::resource(
@@ -87,6 +90,7 @@ class BillingProfileController extends Controller
         );
     }
 
+    /** Update pricing metadata on an existing billing profile without touching its rule history. */
     public function update(UpdateBillingProfileRequest $request, BillingProfile $billingProfile)
     {
         $data = $request->validated();
@@ -119,6 +123,7 @@ class BillingProfileController extends Controller
         );
     }
 
+    /** List the paginated pricing rules that belong to one billing profile. */
     public function rules(BillingRuleIndexRequest $request, BillingProfile $billingProfile)
     {
         $filters = $request->validated();
@@ -141,6 +146,7 @@ class BillingProfileController extends Controller
         return ApiResponse::resource(BillingRuleResource::collection($rules), 'Billing rules retrieved successfully.');
     }
 
+    /** Add a new unit-range pricing rule to a billing profile after overlap validation. */
     public function storeRule(StoreBillingRuleRequest $request, BillingProfile $billingProfile)
     {
         $data = $request->validated();
@@ -169,6 +175,7 @@ class BillingProfileController extends Controller
         return ApiResponse::resource(new BillingRuleResource($rule), 'Billing rule created successfully.', 201);
     }
 
+    /** Update a billing rule while protecting the profile from overlapping active ranges. */
     public function updateRule(UpdateBillingRuleRequest $request, BillingRule $billingRule)
     {
         $data = $request->validated();

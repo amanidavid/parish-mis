@@ -12,16 +12,19 @@ class TenantUserResource extends ApiJsonResource
         $hasRolePermissionsLoaded = $this->relationLoaded('roles')
             && $this->roles->every(fn ($role) => $role->relationLoaded('permissions'));
         $hasAccessRelations = $hasRolePermissionsLoaded || $this->relationLoaded('permissions');
+        $baseUser = $this->whenLoaded('baseUser');
 
         return [
             'uuid' => $this->uuid,
-            'name' => $this->name,
-            'email' => $this->email,
-            'phone' => $this->phone,
-            'status' => $this->status,
+            'name' => $this->resolveProfileValue('name'),
+            'email' => $this->resolveProfileValue('email'),
+            'phone' => $this->resolveProfileValue('phone'),
+            'username' => $baseUser?->username,
+            'status' => $this->resolveProfileValue('status'),
             'base_user' => $this->whenLoaded('baseUser', fn () => $this->baseUser ? [
                 'uuid' => $this->baseUser->uuid,
                 'username' => $this->baseUser->username,
+                'name' => $this->baseUser->name,
                 'email' => $this->baseUser->email,
                 'phone' => $this->baseUser->phone,
                 'status' => $this->baseUser->status,
@@ -40,5 +43,20 @@ class TenantUserResource extends ApiJsonResource
             }),
             ...$this->timestamps(),
         ];
+    }
+
+    private function resolveProfileValue(string $attribute): mixed
+    {
+        $value = $this->{$attribute};
+
+        if ($value !== null && (!is_string($value) || trim($value) !== '')) {
+            return $value;
+        }
+
+        if (!$this->relationLoaded('baseUser') || !$this->baseUser) {
+            return $value;
+        }
+
+        return $this->baseUser->{$attribute};
     }
 }

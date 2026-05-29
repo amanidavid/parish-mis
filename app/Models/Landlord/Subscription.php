@@ -4,6 +4,7 @@ namespace App\Models\Landlord;
 
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Subscription extends BaseModel
 {
@@ -26,5 +27,10 @@ class Subscription extends BaseModel
     public function plan(): BelongsTo
     {
         return $this->belongsTo(Plan::class, 'plan_id');
+    }
+
+    public function profileChanges(): HasMany
+    {
+        return $this->hasMany(SubscriptionProfileChange::class, 'subscription_id');
     }
 }

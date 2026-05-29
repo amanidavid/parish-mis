@@ -5,6 +5,7 @@ namespace App\Services\V1;
 use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\Plan;
 use App\Models\Landlord\Subscription;
+use App\Models\Landlord\SubscriptionProfileChange;
 use App\Models\Landlord\SubscriptionUsage;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
@@ -20,14 +21,18 @@ use Illuminate\Support\Str;
 
 class SubscriptionService
 {
+    /** Tracks property count usage for workspace-level subscription metering. */
     private const METRIC_PROPERTIES = 'properties';
+    /** Tracks total registered units because billing profile rules are unit-band based. */
     private const METRIC_REGISTERED_UNITS_TOTAL = 'registered_units_total';
+    /** Only these subscription states are considered open for provisioning-time reuse. */
     private const OPEN_SUBSCRIPTION_STATUSES = ['trialing', 'active'];
 
     public function __construct(private BillingProfileService $billingProfileService)
     {
     }
 
+    /** Create the first workspace subscription during provisioning and seed the starting usage rows. */
     public function createTrialSubscriptionForTenant(Tenant $tenant, ?string $planUuid = null): Subscription
     {
         $plan = $this->resolveOnboardingPlan($planUuid);
@@ -97,6 +102,7 @@ class SubscriptionService
         });
     }
 
+    /** Refresh the current workspace usage counters that billing summaries and guards depend on. */
     public function syncWorkspaceUsage(Tenant $tenant): array
     {
         $counts = $this->runInTenantContext($tenant, fn () => $this->calculateWorkspaceInventoryTotals());
@@ -113,10 +119,20 @@ class SubscriptionService
         return $counts;
     }
 
+    /** Build the tenant/admin subscription summary, including any pending billing profile change. */
     public function getWorkspaceSubscriptionSummary(Tenant $tenant): array
     {
         $subscription = $this->currentSubscription($tenant);
         $billingProfile = $subscription?->billingProfile ?? $this->resolveWorkspaceBillingProfile($tenant);
+        $pendingProfileChange = $subscription
+            ? SubscriptionProfileChange::query()
+                ->with(['oldBillingProfile:id,uuid,name,billing_interval,currency', 'newBillingProfile:id,uuid,name,billing_interval,currency'])
+                ->where('subscription_id', $subscription->id)
+                ->where('status', 'pending')
+                ->orderBy('effective_at')
+                ->orderByDesc('id')
+                ->first()
+            : null;
         $summaryUsage = $this->runInTenantContext($tenant, function () use ($billingProfile) {
             $counts = $this->calculateWorkspaceInventoryTotals();
 
@@ -170,6 +186,27 @@ class SubscriptionService
                     'currency' => $billingProfile->currency,
                     'status' => $billingProfile->status,
                 ] : null,
+                'pending_billing_profile_change' => $pendingProfileChange ? [
+                    'uuid' => $pendingProfileChange->uuid,
+                    'status' => $pendingProfileChange->status,
+                    'change_timing' => $pendingProfileChange->change_timing,
+                    'effective_at' => $this->formatDateTime($pendingProfileChange->effective_at),
+                    'current_price_cents' => $pendingProfileChange->current_price_cents,
+                    'new_price_cents' => $pendingProfileChange->new_price_cents,
+                    'prorated_adjustment_cents' => $pendingProfileChange->prorated_adjustment_cents,
+                    'old_billing_profile' => $pendingProfileChange->oldBillingProfile ? [
+                        'uuid' => $pendingProfileChange->oldBillingProfile->uuid,
+                        'name' => $pendingProfileChange->oldBillingProfile->name,
+                        'billing_interval' => $pendingProfileChange->oldBillingProfile->billing_interval,
+                        'currency' => $pendingProfileChange->oldBillingProfile->currency,
+                    ] : null,
+                    'new_billing_profile' => $pendingProfileChange->newBillingProfile ? [
+                        'uuid' => $pendingProfileChange->newBillingProfile->uuid,
+                        'name' => $pendingProfileChange->newBillingProfile->name,
+                        'billing_interval' => $pendingProfileChange->newBillingProfile->billing_interval,
+                        'currency' => $pendingProfileChange->newBillingProfile->currency,
+                    ] : null,
+                ] : null,
             ] : null,
             'usage' => [
                 'registered_properties' => $summaryUsage['total_properties'],
@@ -180,6 +217,7 @@ class SubscriptionService
         ];
     }
 
+    /** Return the paginated per-property billing estimate breakdown for drill-down screens. */
     public function getWorkspaceSubscriptionPropertyBreakdown(Tenant $tenant, array $filters = []): LengthAwarePaginator
     {
         return $this->runInTenantContext($tenant, function () use ($tenant, $filters) {
@@ -232,6 +270,7 @@ class SubscriptionService
         });
     }
 
+    /** Fetch the latest subscription record that represents the workspace's current billing state. */
     public function currentSubscription(Tenant $tenant): ?Subscription
     {
         return Subscription::query()
@@ -241,6 +280,7 @@ class SubscriptionService
             ->first();
     }
 
+    /** Change subscription lifecycle status and recalculate period anchors for that status. */
     public function updateSubscriptionStatus(Tenant $tenant, array|string $payload): ?Subscription
     {
         $attributes = is_array($payload) ? $payload : ['status' => $payload];
@@ -276,6 +316,7 @@ class SubscriptionService
         return $subscription->fresh(['plan', 'billingProfile']);
     }
 
+    /** Block inventory mutations when the workspace billing state does not allow operational changes. */
     public function assertWorkspaceAllowsInventoryMutation(Tenant $tenant): void
     {
         $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
@@ -335,20 +376,113 @@ class SubscriptionService
         ];
     }
 
-    private function estimateWorkspaceTotalPrice(?BillingProfile $billingProfile): int
+    /** Reuse grouped property usage to estimate the total billing amount without scanning each property repeatedly. */
+    public function estimateTotalPriceFromFrequencies(Collection $frequencies, ?BillingProfile $billingProfile, CarbonInterface|string|null $date = null): int
     {
         if (!$billingProfile) {
             return 0;
         }
 
-        $rules = $this->billingProfileService->activeRulesForDate($billingProfile);
-        $frequencies = $this->propertyRegisteredUnitFrequencies();
+        $rules = $this->billingProfileService->activeRulesForDate($billingProfile, $date);
 
         return (int) $frequencies->sum(function (object $frequency) use ($rules) {
             $rule = $this->billingProfileService->matchingRuleFromCollection($rules, (int) $frequency->registered_units);
 
             return ($rule?->price_cents ?? 0) * (int) $frequency->properties_count;
         });
+    }
+
+    /** Aggregate workspace properties by registered-unit bucket so pricing can be calculated efficiently. */
+    public function getWorkspacePropertyUsageFrequencies(Tenant $tenant): Collection
+    {
+        return $this->runInTenantContext($tenant, fn () => $this->propertyRegisteredUnitFrequencies());
+    }
+
+    /** Resolve the billing profile currently governing the workspace, falling back to the active default profile. */
+    public function resolveWorkspaceBillingProfile(Tenant $tenant): ?BillingProfile
+    {
+        $billingProfileUuid = data_get($tenant->meta, 'billing_profile_uuid');
+
+        if (!empty($billingProfileUuid)) {
+            return BillingProfile::query()
+                ->select(['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'])
+                ->where('uuid', $billingProfileUuid)
+                ->first();
+        }
+
+        return BillingProfile::query()
+            ->select(['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'])
+            ->where('status', 'active')
+            ->where('is_default', true)
+            ->first();
+    }
+
+    /** Convert the raw subscription row into an effective state the rest of the app can reason about. */
+    public function resolveSubscriptionState(?Subscription $subscription): array
+    {
+        if (!$subscription) {
+            return [
+                'status' => 'unconfigured',
+                'message' => 'Workspace billing is not configured yet.',
+                'period_starts_at' => null,
+                'period_ends_at' => null,
+                'trial_expired_at' => null,
+                'expires_at' => null,
+                'is_current_period_active' => false,
+            ];
+        }
+
+        $now = now();
+        $effectiveStatus = $subscription->status;
+        $message = $subscription->status === 'trialing'
+            ? 'Workspace access is active during the trial period.'
+            : 'Workspace access is active.';
+        $trialExpiredAt = null;
+        $expiresAt = null;
+        $isCurrentPeriodActive = true;
+
+        if ($subscription->status === 'trialing' && $subscription->trial_ends_at?->lt($now)) {
+            $effectiveStatus = 'past_due';
+            $trialExpiredAt = $subscription->trial_ends_at;
+            $expiresAt = $subscription->trial_ends_at;
+            $message = 'The trial period ended on '.$subscription->trial_ends_at->format('Y-m-d H:i:s').'. Payment is required to continue.';
+            $isCurrentPeriodActive = false;
+        } elseif ($subscription->status === 'active' && $subscription->ends_at?->lt($now)) {
+            $effectiveStatus = 'past_due';
+            $expiresAt = $subscription->ends_at;
+            $message = 'The current billing period ended on '.$subscription->ends_at->format('Y-m-d H:i:s').'. Payment is required to continue.';
+            $isCurrentPeriodActive = false;
+        } elseif ($subscription->status === 'past_due') {
+            $message = 'Workspace billing is overdue. Payment is required before inventory changes can continue.';
+            $expiresAt = $subscription->ends_at ?? $subscription->trial_ends_at;
+            $isCurrentPeriodActive = false;
+        } elseif ($subscription->status === 'canceled') {
+            $message = 'Workspace subscription is canceled.';
+            $expiresAt = $subscription->ends_at ?? $subscription->trial_ends_at;
+            $isCurrentPeriodActive = false;
+        }
+
+        return [
+            'status' => $effectiveStatus,
+            'message' => $message,
+            'period_starts_at' => $subscription->starts_at,
+            'period_ends_at' => $subscription->status === 'trialing'
+                ? $subscription->trial_ends_at
+                : $subscription->ends_at,
+            'trial_expired_at' => $trialExpiredAt,
+            'expires_at' => $expiresAt,
+            'is_current_period_active' => $isCurrentPeriodActive,
+        ];
+    }
+
+    private function estimateWorkspaceTotalPrice(?BillingProfile $billingProfile): int
+    {
+        if (!$billingProfile) {
+            return 0;
+        }
+
+        $frequencies = $this->propertyRegisteredUnitFrequencies();
+        return $this->estimateTotalPriceFromFrequencies($frequencies, $billingProfile);
     }
 
     private function propertyRegisteredUnitFrequencies(): Collection
@@ -399,24 +533,6 @@ class SubscriptionService
             'name', '' => $query->orderBy('properties.name', $direction),
             default => $query->orderBy('properties.name'),
         };
-    }
-
-    private function resolveWorkspaceBillingProfile(Tenant $tenant): ?BillingProfile
-    {
-        $billingProfileUuid = data_get($tenant->meta, 'billing_profile_uuid');
-
-        if (!empty($billingProfileUuid)) {
-            return BillingProfile::query()
-                ->select(['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'])
-                ->where('uuid', $billingProfileUuid)
-                ->first();
-        }
-
-        return BillingProfile::query()
-            ->select(['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'])
-            ->where('status', 'active')
-            ->where('is_default', true)
-            ->first();
     }
 
     private function updateUsageMetric(int $tenantId, string $metric, int $quantity, Carbon $now, array $meta = []): void
@@ -481,63 +597,6 @@ class SubscriptionService
                 'inventory_changes_allowed' => false,
             ],
         };
-    }
-
-    private function resolveSubscriptionState(?Subscription $subscription): array
-    {
-        if (!$subscription) {
-            return [
-                'status' => 'unconfigured',
-                'message' => 'Workspace billing is not configured yet.',
-                'period_starts_at' => null,
-                'period_ends_at' => null,
-                'trial_expired_at' => null,
-                'expires_at' => null,
-                'is_current_period_active' => false,
-            ];
-        }
-
-        $now = now();
-        $effectiveStatus = $subscription->status;
-        $message = $subscription->status === 'trialing'
-            ? 'Workspace access is active during the trial period.'
-            : 'Workspace access is active.';
-        $trialExpiredAt = null;
-        $expiresAt = null;
-        $isCurrentPeriodActive = true;
-
-        if ($subscription->status === 'trialing' && $subscription->trial_ends_at?->lt($now)) {
-            $effectiveStatus = 'past_due';
-            $trialExpiredAt = $subscription->trial_ends_at;
-            $expiresAt = $subscription->trial_ends_at;
-            $message = 'The trial period ended on '.$subscription->trial_ends_at->format('Y-m-d H:i:s').'. Payment is required to continue.';
-            $isCurrentPeriodActive = false;
-        } elseif ($subscription->status === 'active' && $subscription->ends_at?->lt($now)) {
-            $effectiveStatus = 'past_due';
-            $expiresAt = $subscription->ends_at;
-            $message = 'The current billing period ended on '.$subscription->ends_at->format('Y-m-d H:i:s').'. Payment is required to continue.';
-            $isCurrentPeriodActive = false;
-        } elseif ($subscription->status === 'past_due') {
-            $message = 'Workspace billing is overdue. Payment is required before inventory changes can continue.';
-            $expiresAt = $subscription->ends_at ?? $subscription->trial_ends_at;
-            $isCurrentPeriodActive = false;
-        } elseif ($subscription->status === 'canceled') {
-            $message = 'Workspace subscription is canceled.';
-            $expiresAt = $subscription->ends_at ?? $subscription->trial_ends_at;
-            $isCurrentPeriodActive = false;
-        }
-
-        return [
-            'status' => $effectiveStatus,
-            'message' => $message,
-            'period_starts_at' => $subscription->starts_at,
-            'period_ends_at' => $subscription->status === 'trialing'
-                ? $subscription->trial_ends_at
-                : $subscription->ends_at,
-            'trial_expired_at' => $trialExpiredAt,
-            'expires_at' => $expiresAt,
-            'is_current_period_active' => $isCurrentPeriodActive,
-        ];
     }
 
     private function calculateTrialEndsAt(CarbonInterface|string $startsAt, int $trialDays): Carbon

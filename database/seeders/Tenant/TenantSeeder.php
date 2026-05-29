@@ -32,6 +32,7 @@ class TenantSeeder extends Seeder
 
         $perms = [
             'locations.view',
+            'properties.scope.all',
             'property_types.view','property_types.create','property_types.update','property_types.delete',
             'properties.view','properties.create','properties.update','properties.delete',
             'property_floors.view','property_floors.create','property_floors.update','property_floors.delete',

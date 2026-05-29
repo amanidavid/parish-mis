@@ -10,6 +10,8 @@ use App\Http\Requests\Api\App\V1\UpdatePropertyFloorRequest;
 use App\Http\Resources\App\V1\PropertyFloorResource;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\Property;
+use App\Models\Tenant\User as TenantUser;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
@@ -18,12 +20,21 @@ class PropertyFloorController extends Controller
 {
     use InteractsWithTenantModels;
 
+    public function __construct(private PropertyAssignmentAccessService $propertyAssignmentAccessService)
+    {
+    }
+
     public function index(PropertyFloorIndexRequest $request)
     {
         $this->authorize('viewAny', PropertyFloor::class);
 
         $filters = $request->validated();
+        $tenantUser = request()->user();
         $query = PropertyFloor::query()->with(['property'])->withCount('units');
+
+        if ($tenantUser instanceof TenantUser) {
+            $this->propertyAssignmentAccessService->scopePropertyFloors($query, $tenantUser, 'property_id');
+        }
 
         if (!empty($filters['property_uuid'] ?? null)) {
             $property = $this->resolveModelByUuid(Property::class, $filters['property_uuid']);
@@ -60,6 +71,12 @@ class PropertyFloorController extends Controller
         $property = $this->resolveModelByUuid(Property::class, $data['property_uuid']);
         if (!$property) {
             return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
+        }
+
+        $tenantUser = request()->user();
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->canAccessPropertyModel($tenantUser, $property)) {
+            return ApiResponse::forbidden(['property' => ['You do not have access to the selected property.']]);
         }
 
         $exists = PropertyFloor::query()
@@ -108,6 +125,12 @@ class PropertyFloorController extends Controller
             if (!$property) {
                 return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
             }
+        }
+
+        $tenantUser = request()->user();
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->canAccessPropertyModel($tenantUser, $property)) {
+            return ApiResponse::forbidden(['property' => ['You do not have access to the selected property.']]);
         }
 
         $name = isset($data['name']) ? trim($data['name']) : $propertyFloor->name;

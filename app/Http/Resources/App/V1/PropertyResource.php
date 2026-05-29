@@ -9,6 +9,9 @@ class PropertyResource extends ApiJsonResource
 {
     public function toArray(Request $request): array
     {
+        $country = $this->country ?? $this->district?->region?->country;
+        $region = $this->region ?? $this->district?->region;
+
         return [
             'uuid' => $this->uuid,
             'name' => $this->name,
@@ -18,21 +21,25 @@ class PropertyResource extends ApiJsonResource
             ] : null),
             'address_line' => $this->address_line,
             'postal_code' => $this->postal_code,
-            'location' => $this->whenLoaded('district', fn () => [
+            'location' => [
+                'country' => $country ? [
+                    'uuid' => $country->uuid,
+                    'name' => $country->name,
+                    'code' => $country->code,
+                ] : null,
+                'region' => $region ? [
+                    'uuid' => $region->uuid,
+                    'name' => $region->name,
+                ] : null,
                 'district' => $this->district ? [
                     'uuid' => $this->district->uuid,
                     'name' => $this->district->name,
                 ] : null,
-                'region' => $this->district?->region ? [
-                    'uuid' => $this->district->region->uuid,
-                    'name' => $this->district->region->name,
+                'ward' => $this->ward ? [
+                    'uuid' => $this->ward->uuid,
+                    'name' => $this->ward->name,
                 ] : null,
-                'country' => $this->district?->region?->country ? [
-                    'uuid' => $this->district->region->country->uuid,
-                    'name' => $this->district->region->country->name,
-                    'code' => $this->district->region->country->code,
-                ] : null,
-            ]),
+            ],
             'status' => $this->status,
             'floors_count' => $this->whenCounted('floors'),
             'units_count' => $this->whenCounted('units'),

@@ -12,6 +12,8 @@ use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
+use App\Models\Tenant\User as TenantUser;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
@@ -21,7 +23,10 @@ class CustomerContractController extends Controller
 {
     use InteractsWithTenantModels;
 
-    public function __construct(private CustomerContractRuleService $ruleService)
+    public function __construct(
+        private CustomerContractRuleService $ruleService,
+        private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+    )
     {
     }
 
@@ -30,9 +35,14 @@ class CustomerContractController extends Controller
         $this->authorize('viewAny', CustomerContract::class);
 
         $filters = $request->validated();
+        $tenantUser = request()->user();
         $query = CustomerContract::query()
             ->with(['customer', 'unit.propertyFloor.property'])
             ->withCount('documents');
+
+        if ($tenantUser instanceof TenantUser) {
+            $this->propertyAssignmentAccessService->scopeContracts($query, $tenantUser);
+        }
 
         if (!empty($filters['property_uuid'] ?? null)) {
             $property = $this->resolveModelByUuid(Property::class, $filters['property_uuid']);
@@ -93,6 +103,18 @@ class CustomerContractController extends Controller
         }
         if ($error !== null) {
             return $error;
+        }
+
+        $tenantUser = request()->user();
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->userCanAccessProperty(
+                $tenantUser,
+                (int) Unit::query()
+                    ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
+                    ->where('units.id', $unitId)
+                    ->value('property_floors.property_id')
+            )) {
+            return ApiResponse::forbidden(['unit' => ['You do not have access to the selected unit property.']]);
         }
 
         $exists = CustomerContract::query()->where('contract_number', trim($data['contract_number']))->exists();
@@ -156,6 +178,18 @@ class CustomerContractController extends Controller
             if ($error !== null) {
                 return $error;
             }
+        }
+
+        $tenantUser = request()->user();
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->userCanAccessProperty(
+                $tenantUser,
+                (int) Unit::query()
+                    ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
+                    ->where('units.id', $unitId)
+                    ->value('property_floors.property_id')
+            )) {
+            return ApiResponse::forbidden(['unit' => ['You do not have access to the selected unit property.']]);
         }
 
         if (isset($data['contract_number'])) {

@@ -3,31 +3,37 @@
 namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\App\V1\PreviewWorkspaceBillingProfileChangeRequest;
 use App\Http\Requests\Api\App\V1\StoreWorkspaceRequest;
 use App\Http\Requests\Api\App\V1\WorkspaceSubscriptionPropertyIndexRequest;
 use App\Http\Resources\App\V1\WorkspaceResource;
 use App\Http\Resources\App\V1\WorkspaceSubscriptionPropertyResource;
+use App\Http\Resources\App\V1\WorkspaceSubscriptionResource;
 use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\SubscriptionBillingProfileChangeService;
 use App\Services\V1\SubscriptionService;
 use App\Services\V1\TenantProvisioningService;
 use App\Services\V1\WorkspaceService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 
 class WorkspaceController extends Controller
 {
     public function __construct(
         private SubscriptionService $subscriptionService,
+        private SubscriptionBillingProfileChangeService $subscriptionBillingProfileChangeService,
         private TenantProvisioningService $tenantProvisioningService,
         private WorkspaceService $workspaceService,
     )
     {
     }
 
+    /** List workspaces that belong to the authenticated base user. */
     public function index(Request $request)
     {
         $baseUser = $this->resolveBaseUser();
@@ -42,6 +48,7 @@ class WorkspaceController extends Controller
         return ApiResponse::resource(WorkspaceResource::collection($workspaces), 'Workspace list');
     }
 
+    /** Create a self-service workspace and queue tenant provisioning for the requester. */
     public function store(StoreWorkspaceRequest $request)
     {
         $baseUser = $this->resolveBaseUser();
@@ -78,6 +85,7 @@ class WorkspaceController extends Controller
         );
     }
 
+    /** Return one workspace only if the authenticated base user belongs to it. */
     public function show(Tenant $workspace)
     {
         $baseUser = $this->resolveBaseUser();
@@ -94,6 +102,7 @@ class WorkspaceController extends Controller
         return ApiResponse::resource(new WorkspaceResource($workspace), 'Workspace details');
     }
 
+    /** Return the active workspace subscription summary after applying any due scheduled profile change. */
     public function subscription()
     {
         $tenant = request()->attributes->get('tenant');
@@ -105,14 +114,52 @@ class WorkspaceController extends Controller
             );
         }
 
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
+
         return ApiResponse::resource(
-            new \App\Http\Resources\App\V1\WorkspaceSubscriptionResource(
+            new WorkspaceSubscriptionResource(
                 $this->subscriptionService->getWorkspaceSubscriptionSummary($tenant)
             ),
             'Workspace subscription details retrieved successfully.'
         );
     }
 
+    /** Preview how a billing profile change would affect the current workspace before any write occurs. */
+    public function previewBillingProfileChange(PreviewWorkspaceBillingProfileChangeRequest $request)
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if (!$tenant instanceof Tenant) {
+            return ApiResponse::serverError(
+                ['workspace' => [ApiMessages::TENANT_CONTEXT_UNAVAILABLE]],
+                ApiMessages::TENANT_CONTEXT_UNAVAILABLE
+            );
+        }
+
+        $profile = BillingProfile::query()->where('uuid', $request->validated('billing_profile_uuid'))->first();
+
+        if (!$profile) {
+            return ApiResponse::error(
+                'Billing profile preview failed.',
+                ['billing_profile_uuid' => ['The selected billing profile could not be found.']],
+                422
+            );
+        }
+
+        try {
+            $preview = $this->subscriptionBillingProfileChangeService->preview($tenant, $profile, $request->validated());
+        } catch (InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                'Billing profile preview failed.',
+                ['billing_profile' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        return ApiResponse::resource($preview, 'Workspace billing profile change preview generated successfully.');
+    }
+
+    /** Return paginated property-by-property billing estimates for the current workspace. */
     public function subscriptionProperties(WorkspaceSubscriptionPropertyIndexRequest $request)
     {
         $tenant = request()->attributes->get('tenant');
@@ -123,6 +170,8 @@ class WorkspaceController extends Controller
                 ApiMessages::TENANT_CONTEXT_UNAVAILABLE
             );
         }
+
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
 
         $properties = $this->subscriptionService->getWorkspaceSubscriptionPropertyBreakdown(
             $tenant,

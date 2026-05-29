@@ -11,6 +11,8 @@ use App\Http\Resources\App\V1\UnitResource;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\Unit;
+use App\Models\Tenant\User as TenantUser;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
@@ -20,7 +22,10 @@ class UnitController extends Controller
 {
     use InteractsWithTenantModels;
 
-    public function __construct(private SubscriptionService $subscriptionService)
+    public function __construct(
+        private SubscriptionService $subscriptionService,
+        private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+    )
     {
     }
 
@@ -29,7 +34,12 @@ class UnitController extends Controller
         $this->authorize('viewAny', Unit::class);
 
         $filters = $request->validated();
+        $tenantUser = request()->user();
         $query = Unit::query()->with('propertyFloor.property');
+
+        if ($tenantUser instanceof TenantUser) {
+            $this->propertyAssignmentAccessService->scopeUnits($query, $tenantUser);
+        }
 
         if (!empty($filters['property_uuid'] ?? null)) {
             $property = $this->resolveModelByUuid(Property::class, $filters['property_uuid']);
@@ -78,6 +88,12 @@ class UnitController extends Controller
             return ApiResponse::error('Property floor not found', ['property_floor_uuid' => ['Invalid floor identifier']], 422);
         }
 
+        $tenantUser = request()->user();
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $propertyFloor->property_id)) {
+            return ApiResponse::forbidden(['property_floor' => ['You do not have access to the selected property floor.']]);
+        }
+
         $exists = Unit::query()
             ->where('property_floor_id', $propertyFloor->id)
             ->where('unit_number', $data['unit_number'])
@@ -118,6 +134,12 @@ class UnitController extends Controller
             if (!$propertyFloor) {
                 return ApiResponse::error('Property floor not found', ['property_floor_uuid' => ['Invalid floor identifier']], 422);
             }
+        }
+
+        $tenantUser = request()->user();
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $propertyFloor->property_id)) {
+            return ApiResponse::forbidden(['property_floor' => ['You do not have access to the selected property floor.']]);
         }
 
         $unitNumber = isset($data['unit_number']) ? trim($data['unit_number']) : $unit->unit_number;

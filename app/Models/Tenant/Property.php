@@ -11,6 +11,16 @@ class Property extends BaseModel
 {
     protected $table = 'properties';
 
+    public function country(): BelongsTo
+    {
+        return $this->belongsTo(Country::class, 'country_id');
+    }
+
+    public function region(): BelongsTo
+    {
+        return $this->belongsTo(Region::class, 'region_id');
+    }
+
     public function type(): BelongsTo
     {
         return $this->belongsTo(PropertyType::class, 'type_id');
@@ -19,6 +29,11 @@ class Property extends BaseModel
     public function district(): BelongsTo
     {
         return $this->belongsTo(District::class, 'district_id');
+    }
+
+    public function ward(): BelongsTo
+    {
+        return $this->belongsTo(Ward::class, 'ward_id');
     }
 
     public function floors(): HasMany

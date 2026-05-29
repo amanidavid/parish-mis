@@ -20,11 +20,12 @@ use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenant\User;
 use App\Models\Tenancy\Tenant;
-use App\Services\V1\BillingProfileService;
+use App\Services\V1\SubscriptionBillingProfileChangeService;
 use App\Services\V1\SubscriptionService;
 use App\Services\V1\TenantProvisioningService;
 use App\Services\V1\WorkspaceService;
 use App\Support\ApiResponse;
+use InvalidArgumentException;
 
 class TenantController extends Controller
 {
@@ -32,13 +33,14 @@ class TenantController extends Controller
 
     public function __construct(
         private SubscriptionService $subscriptionService,
-        private BillingProfileService $billingProfileService,
+        private SubscriptionBillingProfileChangeService $subscriptionBillingProfileChangeService,
         private TenantProvisioningService $tenantProvisioningService,
         private WorkspaceService $workspaceService,
     )
     {
     }
 
+    /** List workspaces for the admin area with lightweight filters for operational search. */
     public function index(TenantIndexRequest $request)
     {
         $filters = $request->validated();
@@ -66,11 +68,13 @@ class TenantController extends Controller
         return ApiResponse::resource(TenantResource::collection($tenants), 'Tenants list');
     }
 
+    /** Return one workspace record for admin detail screens. */
     public function show(Tenant $tenant)
     {
         return ApiResponse::resource(new TenantResource($tenant), 'Tenant details');
     }
 
+    /** List staff inside a specific workspace so admin users can inspect tenant membership. */
     public function staff(TenantStaffIndexRequest $request, Tenant $tenant)
     {
         $tenantUsers = $this->runInTenantContext($tenant, function () use ($request) {
@@ -108,6 +112,7 @@ class TenantController extends Controller
         return ApiResponse::resource(TenantUserResource::collection($tenantUsers), 'Tenant staff list');
     }
 
+    /** Create a new workspace from the admin side and queue provisioning of its tenant database. */
     public function store(TenantStoreRequest $request)
     {
         $data = $request->validated();
@@ -140,6 +145,7 @@ class TenantController extends Controller
         return ApiResponse::resource(new TenantResource($tenant->fresh()), 'Primary workspace created. Provisioning queued.', 202);
     }
 
+    /** Retry workspace provisioning when the original async setup did not complete successfully. */
     public function retryProvisioning(Tenant $tenant)
     {
         if ($tenant->provisioning_status === 'provisioning') {
@@ -161,16 +167,22 @@ class TenantController extends Controller
         return ApiResponse::resource(new TenantResource($tenant), 'Tenant provisioning retry queued', 202);
     }
 
+    /** Return the current subscription summary and apply any due scheduled billing profile change first. */
     public function subscription(Tenant $tenant)
     {
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
+
         return ApiResponse::resource(
             new WorkspaceSubscriptionResource($this->subscriptionService->getWorkspaceSubscriptionSummary($tenant)),
             'Workspace subscription details retrieved successfully.'
         );
     }
 
+    /** Return the paginated property-level billing estimate breakdown for one workspace. */
     public function subscriptionProperties(TenantSubscriptionPropertyIndexRequest $request, Tenant $tenant)
     {
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
+
         $properties = $this->subscriptionService->getWorkspaceSubscriptionPropertyBreakdown(
             $tenant,
             $request->validated()
@@ -182,6 +194,7 @@ class TenantController extends Controller
         );
     }
 
+    /** Suspend or reactivate a workspace at the tenant record level. */
     public function updateStatus(TenantStatusUpdateRequest $request, Tenant $tenant)
     {
         $tenant->status = $request->validated('status');
@@ -190,9 +203,11 @@ class TenantController extends Controller
         return ApiResponse::resource(new TenantResource($tenant->fresh()), 'Workspace status updated successfully.');
     }
 
+    /** Change lifecycle status of the current workspace subscription such as trialing, active, or canceled. */
     public function updateSubscriptionStatus(TenantSubscriptionStatusUpdateRequest $request, Tenant $tenant)
     {
         $subscription = $this->subscriptionService->updateSubscriptionStatus($tenant, $request->validated());
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
 
         if (!$subscription) {
             return ApiResponse::notFound(
@@ -207,6 +222,33 @@ class TenantController extends Controller
         );
     }
 
+    /** Preview billing profile impact so admins can review pricing and proration before applying a change. */
+    public function previewBillingProfileChange(AssignTenantBillingProfileRequest $request, Tenant $tenant)
+    {
+        $profile = BillingProfile::query()->where('uuid', $request->validated('billing_profile_uuid'))->first();
+
+        if (!$profile) {
+            return ApiResponse::error(
+                'Billing profile preview failed.',
+                ['billing_profile_uuid' => ['The selected billing profile could not be found.']],
+                422
+            );
+        }
+
+        try {
+            $preview = $this->subscriptionBillingProfileChangeService->preview($tenant, $profile, $request->validated());
+        } catch (InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                'Billing profile preview failed.',
+                ['billing_profile' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        return ApiResponse::resource($preview, 'Workspace billing profile change preview generated successfully.');
+    }
+
+    /** Apply a billing profile change immediately or schedule it for the next billing cycle. */
     public function assignBillingProfile(AssignTenantBillingProfileRequest $request, Tenant $tenant)
     {
         $profile = BillingProfile::query()->where('uuid', $request->validated('billing_profile_uuid'))->first();
@@ -219,7 +261,15 @@ class TenantController extends Controller
             );
         }
 
-        $this->billingProfileService->assignProfileToWorkspace($tenant, $profile);
+        try {
+            $this->subscriptionBillingProfileChangeService->apply($tenant, $profile, $request->validated());
+        } catch (InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                'Billing profile assignment failed.',
+                ['billing_profile' => [$exception->getMessage()]],
+                422
+            );
+        }
 
         return ApiResponse::resource(
             new WorkspaceSubscriptionResource($this->subscriptionService->getWorkspaceSubscriptionSummary($tenant->fresh())),

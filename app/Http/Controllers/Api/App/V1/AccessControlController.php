@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\PermissionIndexRequest;
 use App\Http\Requests\Api\App\V1\RoleIndexRequest;
 use App\Http\Requests\Api\App\V1\StorePermissionRequest;
+use App\Http\Requests\Api\App\V1\StoreRoleRequest;
 use App\Http\Requests\Api\App\V1\SyncRolePermissionsRequest;
 use App\Http\Requests\Api\App\V1\SyncUserDirectPermissionsRequest;
 use App\Http\Resources\App\V1\PermissionResource;
@@ -13,6 +14,7 @@ use App\Http\Resources\App\V1\RoleResource;
 use App\Http\Resources\App\V1\TenantUserResource;
 use App\Models\Tenant\User as TenantUser;
 use App\Services\V1\PermissionService;
+use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -87,6 +89,18 @@ class AccessControlController extends Controller
         return ApiResponse::resource(RoleResource::collection($roles), 'Role list');
     }
 
+    public function storeRole(StoreRoleRequest $request)
+    {
+        $this->ensureAccessControlPermission();
+
+        $role = $this->permissionService->createRole(
+            $request->validated('name'),
+            $request->validated('permission_ids', [])
+        );
+
+        return ApiResponse::resource(new RoleResource($role), 'Role created', 201);
+    }
+
     public function showRole(int $roleId)
     {
         $this->ensureAccessControlPermission();
@@ -134,6 +148,15 @@ class AccessControlController extends Controller
         ]);
 
         return ApiResponse::resource(new TenantUserResource($tenantUser), 'User direct permissions updated');
+    }
+
+    public function destroyRole(int $roleId)
+    {
+        $this->ensureAccessControlPermission();
+
+        $this->permissionService->deleteRole($roleId);
+
+        return ApiResponse::success(ApiMessages::deleted('role'));
     }
 
     private function ensureAccessControlPermission(): void

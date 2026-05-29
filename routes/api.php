@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\App\V1\AccessControlController;
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
 use App\Http\Controllers\Api\App\V1\CustomerContractController;
 use App\Http\Controllers\Api\App\V1\CustomerController;
+use App\Http\Controllers\Api\App\V1\DashboardReportController;
 use App\Http\Controllers\Api\App\V1\LocationController;
 use App\Http\Controllers\Api\App\V1\PropertyController;
 use App\Http\Controllers\Api\App\V1\PropertyFloorController;
@@ -41,6 +42,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('tenants/{tenant}/staff', [TenantController::class, 'staff']);
                 Route::get('tenants/{tenant}/subscription', [TenantController::class, 'subscription']);
                 Route::get('tenants/{tenant}/subscription/properties', [TenantController::class, 'subscriptionProperties']);
+                Route::post('tenants/{tenant}/billing-profile/preview', [TenantController::class, 'previewBillingProfileChange']);
                 Route::patch('tenants/{tenant}/billing-profile', [TenantController::class, 'assignBillingProfile']);
                 Route::patch('tenants/{tenant}/status', [TenantController::class, 'updateStatus']);
                 Route::patch('tenants/{tenant}/subscription-status', [TenantController::class, 'updateSubscriptionStatus']);
@@ -70,20 +72,25 @@ Route::prefix('v1')->group(function () {
 
             Route::middleware(['tenant', 'jwt.auth'])->group(function () {
                 Route::get('auth/me', [AppAuthController::class, 'me']);
+                Route::get('reports/dashboard-overview', [DashboardReportController::class, 'overview']);
                 Route::get('workspace/subscription', [WorkspaceController::class, 'subscription']);
+                Route::post('workspace/subscription/billing-profile/preview', [WorkspaceController::class, 'previewBillingProfileChange']);
                 Route::get('workspace/subscription/properties', [WorkspaceController::class, 'subscriptionProperties']);
                 Route::prefix('access-control')->group(function () {
                     Route::get('permissions', [AccessControlController::class, 'permissions']);
                     Route::post('permissions', [AccessControlController::class, 'storePermission']);
                     Route::get('roles', [AccessControlController::class, 'roles']);
+                    Route::post('roles', [AccessControlController::class, 'storeRole']);
                     Route::get('roles/{roleId}', [AccessControlController::class, 'showRole'])->whereNumber('roleId');
                     Route::put('roles/{roleId}/permissions', [AccessControlController::class, 'syncRolePermissions'])->whereNumber('roleId');
+                    Route::delete('roles/{roleId}', [AccessControlController::class, 'destroyRole'])->whereNumber('roleId');
                     Route::put('users/{tenantUser}/direct-permissions', [AccessControlController::class, 'syncUserDirectPermissions']);
                 });
                 Route::prefix('locations')->group(function () {
                     Route::get('countries', [LocationController::class, 'countries']);
                     Route::get('regions', [LocationController::class, 'regions']);
                     Route::get('districts', [LocationController::class, 'districts']);
+                    Route::get('wards', [LocationController::class, 'wards']);
                 });
                 Route::apiResource('property-types', PropertyTypeController::class);
                 Route::apiResource('properties', PropertyController::class);
@@ -92,7 +99,8 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('customers', CustomerController::class);
                 Route::apiResource('customer-contracts', CustomerContractController::class);
                 Route::apiResource('staff-property-assignments', StaffPropertyAssignmentController::class);
-                Route::apiResource('staff-users', TenantUserController::class);
+                Route::apiResource('staff-users', TenantUserController::class)
+                    ->parameters(['staff-users' => 'tenantUser']);
             });
         });
 });

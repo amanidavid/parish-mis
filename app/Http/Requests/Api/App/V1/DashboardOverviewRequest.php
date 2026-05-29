@@ -3,8 +3,9 @@
 namespace App\Http\Requests\Api\App\V1;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
-class CountryIndexRequest extends FormRequest
+class DashboardOverviewRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -15,9 +16,9 @@ class CountryIndexRequest extends FormRequest
     {
         return [
             'search' => ['nullable', 'string', 'max:120'],
-            'name' => ['nullable', 'string', 'max:120'],
-            'status' => ['nullable', 'in:active,inactive'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:300'],
+            'property_status' => ['nullable', 'string', Rule::in(['active', 'inactive'])],
+            'sort' => ['nullable', 'string', 'max:60'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }
 }

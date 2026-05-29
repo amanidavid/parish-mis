@@ -14,6 +14,7 @@ class UpdateTenantUserRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'username' => ['sometimes', 'nullable', 'string', 'min:3', 'max:50', 'alpha_dash'],
             'name' => ['sometimes', 'string', 'min:3', 'max:100'],
             'phone' => ['sometimes', 'string', 'min:6', 'max:30'],
             'email' => ['sometimes', 'nullable', 'email', 'max:150'],

@@ -106,11 +106,13 @@ class TenantUserController extends Controller
     {
         $this->authorize('view', $tenantUser);
 
-        return ApiResponse::resource(new TenantUserResource($tenantUser->load([
+        $tenantUser->loadMissing([
             'baseUser',
             'roles.permissions',
             'permissions' => fn ($permissionQuery) => $permissionQuery->orderBy('module')->orderBy('name'),
-        ])), 'Tenant staff details');
+        ]);
+
+        return ApiResponse::resource(new TenantUserResource($tenantUser), 'Tenant staff details');
     }
 
     public function update(UpdateTenantUserRequest $request, User $tenantUser)
@@ -121,10 +123,13 @@ class TenantUserController extends Controller
             return ApiResponse::error('Tenant staff update failed', ['staff' => ['Owner account cannot be updated through the staff endpoint']], 422);
         }
 
+        $tenantUser->loadMissing('baseUser');
+
         $data = $request->validated();
         $baseUser = $tenantUser->baseUser;
         $newPhone = $data['phone'] ?? $tenantUser->phone;
         $newEmail = array_key_exists('email', $data) ? $data['email'] : $tenantUser->email;
+        $newUsername = isset($data['username']) ? trim((string) $data['username']) : null;
 
         $tenantConflict = User::query()
             ->where(function ($query) use ($newPhone, $newEmail) {
@@ -140,21 +145,33 @@ class TenantUserController extends Controller
             return ApiResponse::error('Tenant staff update failed', ['staff' => ['Phone or email already belongs to another staff account in this workspace']], 422);
         }
 
+        if ($baseUser && $newUsername !== null && $newUsername !== '' && BaseUser::query()
+            ->where('username', $newUsername)
+            ->whereKeyNot($baseUser->id)
+            ->exists()) {
+            return ApiResponse::error('Staff account could not be updated.', [
+                'username' => ['The selected username is already in use.'],
+            ], 422);
+        }
+
         try {
-            DB::connection('base')->transaction(function () use ($baseUser, $tenantUser, $data, $newPhone, $newEmail) {
-                $baseUser->fill([
-                    'name' => $data['name'] ?? $baseUser->name,
-                    'phone' => $newPhone,
-                    'email' => $newEmail,
-                    'status' => $data['status'] ?? $baseUser->status,
-                ]);
+            if ($baseUser) {
+                DB::connection('base')->transaction(function () use ($baseUser, $data, $newUsername, $newPhone, $newEmail) {
+                    $baseUser->fill([
+                        'username' => $newUsername !== null && $newUsername !== '' ? $newUsername : $baseUser->username,
+                        'name' => $data['name'] ?? $baseUser->name,
+                        'phone' => $newPhone,
+                        'email' => $newEmail,
+                        'status' => $data['status'] ?? $baseUser->status,
+                    ]);
 
-                if (!empty($data['password'] ?? null)) {
-                    $baseUser->password = Hash::make($data['password']);
-                }
+                    if (!empty($data['password'] ?? null)) {
+                        $baseUser->password = Hash::make($data['password']);
+                    }
 
-                $baseUser->save();
-            });
+                    $baseUser->save();
+                });
+            }
 
             DB::transaction(function () use ($tenantUser, $data, $newPhone, $newEmail) {
                 $tenantUser->fill([
