@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\Tenant\Permission as TenantPermission;
+use App\Models\Tenant\Role as TenantRole;
 use App\Models\Tenant\Country;
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
@@ -38,7 +40,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        config([
+            'permission.models.role' => TenantRole::class,
+            'permission.models.permission' => TenantPermission::class,
+        ]);
     }
 
     /**

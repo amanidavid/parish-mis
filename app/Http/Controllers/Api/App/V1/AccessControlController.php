@@ -12,12 +12,12 @@ use App\Http\Requests\Api\App\V1\SyncUserDirectPermissionsRequest;
 use App\Http\Resources\App\V1\PermissionResource;
 use App\Http\Resources\App\V1\RoleResource;
 use App\Http\Resources\App\V1\TenantUserResource;
+use App\Models\Tenant\Permission;
+use App\Models\Tenant\Role;
 use App\Models\Tenant\User as TenantUser;
 use App\Services\V1\PermissionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
-use Spatie\Permission\Models\Permission;
-use Spatie\Permission\Models\Role;
 
 class AccessControlController extends Controller
 {

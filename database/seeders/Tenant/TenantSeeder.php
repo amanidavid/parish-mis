@@ -23,11 +23,6 @@ class TenantSeeder extends Seeder
         DB::table('roles')->insertOrIgnore([
             ['name' => 'owner', 'guard_name' => 'api'],
             ['name' => 'manager', 'guard_name' => 'api'],
-            ['name' => 'accountant', 'guard_name' => 'api'],
-            ['name' => 'cashier', 'guard_name' => 'api'],
-            ['name' => 'property_supervisor', 'guard_name' => 'api'],
-            ['name' => 'maintenance_officer', 'guard_name' => 'api'],
-            ['name' => 'viewer', 'guard_name' => 'api'],
         ]);
 
         $perms = [
@@ -62,7 +57,6 @@ class TenantSeeder extends Seeder
 
         $ownerRoleId = DB::table('roles')->where('name', 'owner')->where('guard_name', 'api')->value('id');
         $managerRoleId = DB::table('roles')->where('name', 'manager')->where('guard_name', 'api')->value('id');
-        $viewerRoleId = DB::table('roles')->where('name', 'viewer')->where('guard_name', 'api')->value('id');
         $permissionIds = DB::table('permissions')->where('guard_name', 'api')->pluck('id', 'name');
 
         foreach ($permissionIds as $permissionId) {
@@ -70,28 +64,6 @@ class TenantSeeder extends Seeder
                 'permission_id' => $permissionId,
                 'role_id' => $ownerRoleId,
             ]);
-        }
-
-        foreach ([
-            'locations.view',
-            'property_types.view',
-            'properties.view',
-            'property_floors.view',
-            'units.view',
-            'customers.view',
-            'customer_contracts.view',
-            'renters.view',
-            'leases.view',
-            'invoices.view',
-            'reports.view',
-            'staff_property_assignments.view',
-        ] as $name) {
-            if (isset($permissionIds[$name])) {
-                DB::table('role_has_permissions')->insertOrIgnore([
-                    'permission_id' => $permissionIds[$name],
-                    'role_id' => $viewerRoleId,
-                ]);
-            }
         }
 
         foreach ([

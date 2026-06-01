@@ -20,7 +20,6 @@ class UnitIndexRequest extends FormRequest
             'status' => ['nullable', 'in:vacant,occupied,maintenance'],
             'unit_number' => ['nullable', 'string', 'max:120'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
-            'sort' => ['nullable', 'in:unit_number,-unit_number,created_at,-created_at'],
         ];
     }
 }

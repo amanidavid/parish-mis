@@ -10,7 +10,7 @@ return [
     'landlord_database_connection_name' => 'base',
 
     // The app connection that should be switched to the tenant's database
-    'tenant_database_connection_name' => 'mysql',
+    'tenant_database_connection_name' => 'tenant',
 
     // How to find the current tenant for a request
     'tenant_finder' => App\Tenancy\HeaderTenantFinder::class,

@@ -4,12 +4,12 @@ namespace App\Services\V1;
 
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
+use App\Models\Tenant\Permission;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\Unit;
 use App\Models\Tenant\User;
 use Illuminate\Database\Eloquent\Builder;
-use Spatie\Permission\Models\Permission;
 
 class PropertyAssignmentAccessService
 {

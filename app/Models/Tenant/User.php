@@ -20,6 +20,7 @@ class User extends BaseModel implements Authenticatable, Authorizable
     use HasRoles;
     use Notifiable;
 
+    protected $connection = 'tenant';
     protected $table = 'users';
 
     protected string $guard_name = 'api';

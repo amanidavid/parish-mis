@@ -9,48 +9,48 @@ return new class extends Migration {
     {
         Schema::table('countries', function (Blueprint $table) {
             if (!Schema::hasColumn('countries', 'legacy_id')) {
-                $table->unsignedInteger('legacy_id')->nullable()->after('id');
+                $table->unsignedInteger('legacy_id')->nullable();
                 $table->unique('legacy_id');
             }
 
             if (!Schema::hasColumn('countries', 'dial_code')) {
-                $table->string('dial_code', 20)->nullable()->after('name');
+                $table->string('dial_code', 20)->nullable();
                 $table->index('dial_code');
             }
         });
 
         Schema::table('regions', function (Blueprint $table) {
             if (!Schema::hasColumn('regions', 'legacy_id')) {
-                $table->unsignedInteger('legacy_id')->nullable()->after('id');
+                $table->unsignedInteger('legacy_id')->nullable();
                 $table->unique('legacy_id');
             }
 
             if (!Schema::hasColumn('regions', 'post_code')) {
-                $table->unsignedInteger('post_code')->nullable()->after('name');
+                $table->unsignedInteger('post_code')->nullable();
                 $table->index('post_code');
             }
         });
 
         Schema::table('districts', function (Blueprint $table) {
             if (!Schema::hasColumn('districts', 'legacy_id')) {
-                $table->unsignedInteger('legacy_id')->nullable()->after('id');
+                $table->unsignedInteger('legacy_id')->nullable();
                 $table->unique('legacy_id');
             }
 
             if (!Schema::hasColumn('districts', 'post_code')) {
-                $table->unsignedInteger('post_code')->nullable()->after('name');
+                $table->unsignedInteger('post_code')->nullable();
                 $table->index('post_code');
             }
         });
 
         Schema::table('wards', function (Blueprint $table) {
             if (!Schema::hasColumn('wards', 'legacy_id')) {
-                $table->unsignedInteger('legacy_id')->nullable()->after('id');
+                $table->unsignedInteger('legacy_id')->nullable();
                 $table->unique('legacy_id');
             }
 
             if (!Schema::hasColumn('wards', 'post_code')) {
-                $table->unsignedInteger('post_code')->nullable()->after('name');
+                $table->unsignedInteger('post_code')->nullable();
                 $table->index('post_code');
             }
         });

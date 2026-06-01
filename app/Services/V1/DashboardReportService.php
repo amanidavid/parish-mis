@@ -104,7 +104,7 @@ class DashboardReportService
     /** Aggregate units by property so occupancy cards and table rows come from one indexed pass. */
     private function unitAggregateSubquery(array $scope): QueryBuilder
     {
-        $query = DB::table('property_floors')
+        $query = $this->tenantTable('property_floors')
             ->select('property_floors.property_id')
             ->leftJoin('units', 'units.property_floor_id', '=', 'property_floors.id')
             ->groupBy('property_floors.property_id')
@@ -119,7 +119,7 @@ class DashboardReportService
     /** Aggregate contract statuses by property so the dashboard can compare contract health side by side. */
     private function contractAggregateSubquery(array $scope): QueryBuilder
     {
-        $query = DB::table('property_floors')
+        $query = $this->tenantTable('property_floors')
             ->select('property_floors.property_id')
             ->join('units', 'units.property_floor_id', '=', 'property_floors.id')
             ->leftJoin('customer_contracts', 'customer_contracts.unit_id', '=', 'units.id')
@@ -137,13 +137,13 @@ class DashboardReportService
     /** Build the base property query and apply staff-assignment scope only once. */
     private function propertiesBaseQuery(array $scope): QueryBuilder
     {
-        return $this->applyPropertyScopeToColumn(DB::table('properties'), $scope, 'properties.id');
+        return $this->applyPropertyScopeToColumn($this->tenantTable('properties'), $scope, 'properties.id');
     }
 
     /** Build the base units query so summary counts can reuse the same scope and joins. */
     private function unitsBaseQuery(array $scope): QueryBuilder
     {
-        $query = DB::table('units')
+        $query = $this->tenantTable('units')
             ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id');
 
         return $this->applyPropertyScopeToColumn($query, $scope, 'property_floors.property_id');
@@ -152,7 +152,7 @@ class DashboardReportService
     /** Build the base contracts query so customer and contract counts stay aligned to the same property scope. */
     private function contractsBaseQuery(array $scope): QueryBuilder
     {
-        $query = DB::table('customer_contracts')
+        $query = $this->tenantTable('customer_contracts')
             ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
             ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id');
 
@@ -199,6 +199,16 @@ class DashboardReportService
                 ->whereColumn('staff_property_assignments.property_id', $propertyColumn)
                 ->where('staff_property_assignments.user_id', $scope['user_id']);
         });
+    }
+
+    private function tenantTable(string $table): QueryBuilder
+    {
+        return DB::connection($this->tenantConnectionName())->table($table);
+    }
+
+    private function tenantConnectionName(): string
+    {
+        return (string) config('multitenancy.tenant_database_connection_name', 'tenant');
     }
 
 }

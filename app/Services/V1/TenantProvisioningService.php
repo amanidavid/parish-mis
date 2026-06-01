@@ -15,6 +15,8 @@ use Spatie\Permission\PermissionRegistrar;
 
 class TenantProvisioningService
 {
+    private const DEFAULT_TENANT_CONNECTION = 'tenant';
+
     public function __construct(private SubscriptionService $subscriptionService)
     {
     }
@@ -28,7 +30,9 @@ class TenantProvisioningService
     {
         $tenant = Tenant::query()->findOrFail($tenantId);
         $owner = BaseUser::query()->findOrFail($ownerId);
-        $originalTenantDatabase = config('database.connections.mysql.database');
+        $tenantConnectionName = $this->tenantConnectionName();
+        $tenantDriver = (string) config(sprintf('database.connections.%s.driver', $tenantConnectionName), 'mysql');
+        $originalTenantDatabase = config(sprintf('database.connections.%s.database', $tenantConnectionName));
 
         if ($tenant->provisioning_status === 'ready') {
             return;
@@ -41,44 +45,32 @@ class TenantProvisioningService
         ]);
 
         try {
-            DB::connection('base')->statement(
-                sprintf(
-                    'CREATE DATABASE IF NOT EXISTS `%s` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci',
-                    str_replace('`', '``', $tenant->database)
-                )
-            );
+            $this->createTenantDatabase($tenant->database, $tenantConnectionName, $tenantDriver);
             $this->log($tenant->id, 'processing', 'database_created', 'Tenant database is ready');
 
-            DB::purge('mysql');
-            config(['database.connections.mysql.database' => $tenant->database]);
-            DB::reconnect('mysql');
+            DB::purge($tenantConnectionName);
+            config([sprintf('database.connections.%s.database', $tenantConnectionName) => $tenant->database]);
+            DB::reconnect($tenantConnectionName);
 
-            DB::connection('mysql')->statement(
-                sprintf('USE `%s`', str_replace('`', '``', $tenant->database))
-            );
-
-            $selected = DB::connection('mysql')->select('select database() as db');
-            if (empty($selected) || (data_get($selected, '0.db') !== $tenant->database)) {
-                throw new \RuntimeException('Failed to select tenant database for migrations');
-            }
+            $this->assertTenantDatabaseSelected($tenant->database, $tenantConnectionName, $tenantDriver);
 
             $this->runArtisanCommand('migrate', [
                 '--path' => 'database/migrations/tenant',
-                '--database' => 'mysql',
+                '--database' => $tenantConnectionName,
                 '--force' => true,
             ], $tenant->id, 'migrations');
             $this->log($tenant->id, 'processing', 'migrated', 'Tenant migrations completed');
 
             $this->runArtisanCommand('db:seed', [
                 '--class' => 'Database\\Seeders\\Tenant\\TenantSeeder',
-                '--database' => 'mysql',
+                '--database' => $tenantConnectionName,
                 '--force' => true,
             ], $tenant->id, 'seeders');
             $this->log($tenant->id, 'processing', 'seeded', 'Tenant seeders completed');
 
             $tenant->makeCurrent();
 
-            $tenantUser = TenantUser::query()->firstOrCreate(
+            $tenantUser = TenantUser::on($tenantConnectionName)->firstOrCreate(
                 ['base_user_id' => $owner->id],
                 [
                     'uuid' => (string) Str::uuid(),
@@ -136,9 +128,9 @@ class TenantProvisioningService
             throw $exception;
         } finally {
             Tenant::forgetCurrent();
-            DB::purge('mysql');
-            config(['database.connections.mysql.database' => $originalTenantDatabase]);
-            DB::reconnect('mysql');
+            DB::purge($tenantConnectionName);
+            config([sprintf('database.connections.%s.database', $tenantConnectionName) => $originalTenantDatabase]);
+            DB::reconnect($tenantConnectionName);
         }
     }
 
@@ -220,5 +212,70 @@ class TenantProvisioningService
                 ? sprintf('Tenant %s failed: %s', $step, $output)
                 : sprintf('Tenant %s failed with exit code %d.', $step, $exitCode)
         );
+    }
+
+    private function tenantConnectionName(): string
+    {
+        return (string) config('multitenancy.tenant_database_connection_name', self::DEFAULT_TENANT_CONNECTION);
+    }
+
+    private function createTenantDatabase(string $databaseName, string $tenantConnectionName, string $tenantDriver): void
+    {
+        if ($tenantDriver === 'pgsql') {
+            $exists = DB::connection('base')->selectOne(
+                'select 1 as present from pg_database where datname = ? limit 1',
+                [$databaseName]
+            );
+
+            if ($exists) {
+                return;
+            }
+
+            $tenantOwner = (string) config(sprintf('database.connections.%s.username', $tenantConnectionName));
+            $quotedDatabase = $this->quoteIdentifier($databaseName, $tenantDriver);
+            $quotedOwner = $this->quoteIdentifier($tenantOwner, $tenantDriver);
+
+            DB::connection('base')->statement(
+                sprintf(
+                    'CREATE DATABASE %s WITH OWNER = %s ENCODING = %s TEMPLATE template0',
+                    $quotedDatabase,
+                    $quotedOwner,
+                    DB::connection('base')->getPdo()->quote('UTF8')
+                )
+            );
+
+            return;
+        }
+
+        DB::connection('base')->statement(
+                sprintf(
+                    'CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci',
+                $this->quoteIdentifier($databaseName, $tenantDriver)
+            )
+        );
+    }
+
+    private function assertTenantDatabaseSelected(string $databaseName, string $tenantConnectionName, string $tenantDriver): void
+    {
+        $selected = $tenantDriver === 'pgsql'
+            ? DB::connection($tenantConnectionName)->selectOne('select current_database() as db')
+            : DB::connection($tenantConnectionName)->selectOne('select database() as db');
+
+        if (!$selected || data_get($selected, 'db') !== $databaseName) {
+            throw new \RuntimeException('Failed to select tenant database for migrations');
+        }
+    }
+
+    private function quoteIdentifier(string $value, string $driver): string
+    {
+        if ($driver === 'pgsql') {
+            return sprintf('"%s"', str_replace('"', '""', $value));
+        }
+
+        if ($driver === 'mysql') {
+            return sprintf('`%s`', str_replace('`', '``', $value));
+        }
+
+        return sprintf('"%s"', str_replace('"', '""', $value));
     }
 }

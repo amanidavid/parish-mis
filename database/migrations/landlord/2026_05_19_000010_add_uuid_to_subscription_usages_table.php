@@ -9,9 +9,11 @@ use Illuminate\Support\Str;
 return new class extends Migration {
     public function up(): void
     {
+        $driver = Schema::connection('base')->getConnection()->getDriverName();
+
         if (!Schema::connection('base')->hasColumn('subscription_usages', 'uuid')) {
             Schema::connection('base')->table('subscription_usages', function (Blueprint $table) {
-                $table->char('uuid', 36)->nullable()->after('id');
+                $table->char('uuid', 36)->nullable();
             });
         }
 
@@ -29,9 +31,15 @@ return new class extends Migration {
                 }
             });
 
-        DB::connection('base')->statement(
-            'ALTER TABLE `subscription_usages` MODIFY `uuid` CHAR(36) NOT NULL'
-        );
+        if ($driver === 'pgsql') {
+            DB::connection('base')->statement(
+                'ALTER TABLE subscription_usages ALTER COLUMN uuid SET NOT NULL'
+            );
+        } else {
+            DB::connection('base')->statement(
+                'ALTER TABLE `subscription_usages` MODIFY `uuid` CHAR(36) NOT NULL'
+            );
+        }
 
         Schema::connection('base')->table('subscription_usages', function (Blueprint $table) {
             $table->unique('uuid');

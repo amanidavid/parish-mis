@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -12,19 +13,10 @@ return new class extends Migration
             return;
         }
 
-        try {
-            Schema::table('customers', function (Blueprint $table) {
-                $table->dropForeign(['property_id']);
-            });
-        } catch (\Throwable) {
-        }
+        $driver = DB::getDriverName();
 
-        try {
-            Schema::table('customers', function (Blueprint $table) {
-                $table->dropForeign(['unit_id']);
-            });
-        } catch (\Throwable) {
-        }
+        $this->dropForeignIfExists('customers', 'customers_property_id_foreign', $driver);
+        $this->dropForeignIfExists('customers', 'customers_unit_id_foreign', $driver);
 
         if (Schema::hasColumn('customers', 'property_id')) {
             Schema::table('customers', function (Blueprint $table) {
@@ -38,12 +30,16 @@ return new class extends Migration
             });
         }
 
-        try {
+        if (!$this->hasIndex('customers', 'customers_customer_type_display_name_index', $driver)) {
             Schema::table('customers', function (Blueprint $table) {
-                $table->index(['customer_type', 'display_name']);
-                $table->index(['status', 'display_name']);
+                $table->index(['customer_type', 'display_name'], 'customers_customer_type_display_name_index');
             });
-        } catch (\Throwable) {
+        }
+
+        if (!$this->hasIndex('customers', 'customers_status_display_name_index', $driver)) {
+            Schema::table('customers', function (Blueprint $table) {
+                $table->index(['status', 'display_name'], 'customers_status_display_name_index');
+            });
         }
     }
 
@@ -55,8 +51,45 @@ return new class extends Migration
 
         Schema::table('customers', function (Blueprint $table) {
             if (!Schema::hasColumn('customers', 'property_id')) {
-                $table->foreignId('property_id')->nullable()->after('uuid')->constrained('properties')->cascadeOnDelete();
+                $table->foreignId('property_id')->nullable()->constrained('properties')->cascadeOnDelete();
             }
         });
+    }
+
+    private function dropForeignIfExists(string $table, string $constraint, string $driver): void
+    {
+        if ($driver === 'pgsql') {
+            DB::statement(sprintf('ALTER TABLE "%s" DROP CONSTRAINT IF EXISTS "%s"', $table, $constraint));
+
+            return;
+        }
+
+        $exists = DB::table('information_schema.table_constraints')
+            ->where('table_schema', DB::getDatabaseName())
+            ->where('table_name', $table)
+            ->where('constraint_name', $constraint)
+            ->where('constraint_type', 'FOREIGN KEY')
+            ->exists();
+
+        if ($exists) {
+            DB::statement(sprintf('ALTER TABLE `%s` DROP FOREIGN KEY `%s`', $table, $constraint));
+        }
+    }
+
+    private function hasIndex(string $table, string $index, string $driver): bool
+    {
+        if ($driver === 'pgsql') {
+            return DB::table('pg_indexes')
+                ->where('schemaname', DB::getConfig('search_path') ?: 'public')
+                ->where('tablename', $table)
+                ->where('indexname', $index)
+                ->exists();
+        }
+
+        return DB::table('information_schema.statistics')
+            ->where('table_schema', DB::getDatabaseName())
+            ->where('table_name', $table)
+            ->where('index_name', $index)
+            ->exists();
     }
 };

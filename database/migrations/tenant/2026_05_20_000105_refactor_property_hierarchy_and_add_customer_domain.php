@@ -42,7 +42,7 @@ return new class extends Migration
         if (Schema::hasTable('property_floors')) {
             Schema::table('property_floors', function (Blueprint $table) {
                 if (!Schema::hasColumn('property_floors', 'property_block_id')) {
-                    $table->foreignId('property_block_id')->nullable()->after('uuid')->constrained('property_blocks')->cascadeOnDelete();
+                    $table->foreignId('property_block_id')->nullable()->constrained('property_blocks')->cascadeOnDelete();
                 }
             });
         }
@@ -50,7 +50,7 @@ return new class extends Migration
         if (Schema::hasTable('units')) {
             Schema::table('units', function (Blueprint $table) {
                 if (!Schema::hasColumn('units', 'property_id')) {
-                    $table->foreignId('property_id')->nullable()->after('uuid')->constrained('properties')->cascadeOnDelete();
+                    $table->foreignId('property_id')->nullable()->constrained('properties')->cascadeOnDelete();
                 }
             });
         }
@@ -62,22 +62,34 @@ return new class extends Migration
             return;
         }
 
+        $driver = DB::getDriverName();
+
         Schema::table('property_floors', function (Blueprint $table) {
             if (!Schema::hasColumn('property_floors', 'property_id')) {
-                $table->foreignId('property_id')->nullable()->after('uuid')->constrained('properties')->cascadeOnDelete();
+                $table->foreignId('property_id')->nullable()->constrained('properties')->cascadeOnDelete();
             }
 
             if (!Schema::hasColumn('property_floors', 'name')) {
-                $table->string('name')->nullable()->after('property_id');
+                $table->string('name')->nullable();
             }
         });
 
-        DB::table('property_floors')
-            ->join('property_blocks', 'property_blocks.id', '=', 'property_floors.property_block_id')
-            ->whereNull('property_floors.property_id')
-            ->update([
-                'property_floors.property_id' => DB::raw('property_blocks.property_id'),
-            ]);
+        if ($driver === 'pgsql') {
+            DB::statement('
+                UPDATE property_floors
+                SET property_id = property_blocks.property_id
+                FROM property_blocks
+                WHERE property_blocks.id = property_floors.property_block_id
+                  AND property_floors.property_id IS NULL
+            ');
+        } else {
+            DB::table('property_floors')
+                ->join('property_blocks', 'property_blocks.id', '=', 'property_floors.property_block_id')
+                ->whereNull('property_floors.property_id')
+                ->update([
+                    'property_floors.property_id' => DB::raw('property_blocks.property_id'),
+                ]);
+        }
 
         DB::table('property_floors')
             ->whereNull('name')
@@ -122,7 +134,7 @@ return new class extends Migration
 
         Schema::table('units', function (Blueprint $table) {
             if (!Schema::hasColumn('units', 'property_floor_id')) {
-                $table->foreignId('property_floor_id')->nullable()->after('uuid')->constrained('property_floors')->cascadeOnDelete();
+                $table->foreignId('property_floor_id')->nullable()->constrained('property_floors')->cascadeOnDelete();
             }
         });
 

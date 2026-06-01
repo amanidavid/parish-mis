@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration {
@@ -18,8 +19,15 @@ return new class extends Migration {
                 $table->index(['module', 'guard_name']);
             });
         } elseif (!Schema::hasColumn('permissions', 'module')) {
-            Schema::table('permissions', function (Blueprint $table) {
-                $table->string('module')->nullable()->after('name');
+            $driver = DB::getDriverName();
+
+            Schema::table('permissions', function (Blueprint $table) use ($driver) {
+                $column = $table->string('module')->nullable();
+
+                if ($driver === 'mysql') {
+                    $column->after('name');
+                }
+
                 $table->index(['module', 'guard_name']);
             });
         }

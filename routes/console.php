@@ -5,21 +5,23 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 
+$tenantConnectionName = (string) config('multitenancy.tenant_database_connection_name', 'tenant');
+
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-Artisan::command('tenants:migrate-existing {--tenant=} {--chunk=20}', function () {
+Artisan::command('tenants:migrate-existing {--tenant=} {--chunk=20}', function () use ($tenantConnectionName) {
     $tenantUuid = $this->option('tenant');
     $chunkSize = max((int) $this->option('chunk'), 1);
 
-    $runMigration = function (Tenant $tenant): void {
+    $runMigration = function (Tenant $tenant) use ($tenantConnectionName): void {
         try {
             $tenant->makeCurrent();
 
             $exitCode = Artisan::call('migrate', [
                 '--path' => 'database/migrations/tenant',
-                '--database' => 'mysql',
+                '--database' => $tenantConnectionName,
                 '--force' => true,
             ]);
 
@@ -32,8 +34,8 @@ Artisan::command('tenants:migrate-existing {--tenant=} {--chunk=20}', function (
             $this->error(sprintf('[FAIL] %s | %s | %s', $tenant->uuid, $tenant->database, $exception->getMessage()));
         } finally {
             Tenant::forgetCurrent();
-            DB::purge('mysql');
-            DB::reconnect('mysql');
+            DB::purge($tenantConnectionName);
+            DB::reconnect($tenantConnectionName);
         }
     };
 
@@ -60,17 +62,17 @@ Artisan::command('tenants:migrate-existing {--tenant=} {--chunk=20}', function (
     return self::SUCCESS;
 })->purpose('Run tenant migrations for existing ready tenant databases');
 
-Artisan::command('tenants:seed-existing {--tenant=} {--chunk=20}', function () {
+Artisan::command('tenants:seed-existing {--tenant=} {--chunk=20}', function () use ($tenantConnectionName) {
     $tenantUuid = $this->option('tenant');
     $chunkSize = max((int) $this->option('chunk'), 1);
 
-    $runSeeder = function (Tenant $tenant): void {
+    $runSeeder = function (Tenant $tenant) use ($tenantConnectionName): void {
         try {
             $tenant->makeCurrent();
 
             $exitCode = Artisan::call('db:seed', [
                 '--class' => 'Database\\Seeders\\Tenant\\TenantSeeder',
-                '--database' => 'mysql',
+                '--database' => $tenantConnectionName,
                 '--force' => true,
             ]);
 
@@ -83,8 +85,8 @@ Artisan::command('tenants:seed-existing {--tenant=} {--chunk=20}', function () {
             $this->error(sprintf('[FAIL] %s | %s | %s', $tenant->uuid, $tenant->database, $exception->getMessage()));
         } finally {
             Tenant::forgetCurrent();
-            DB::purge('mysql');
-            DB::reconnect('mysql');
+            DB::purge($tenantConnectionName);
+            DB::reconnect($tenantConnectionName);
         }
     };
 

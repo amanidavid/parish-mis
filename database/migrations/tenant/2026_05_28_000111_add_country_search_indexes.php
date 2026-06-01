@@ -8,9 +8,11 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
+        $driver = DB::getDriverName();
+
         Schema::table('countries', function (Blueprint $table) {
             if (!Schema::hasColumn('countries', 'dial_code_search')) {
-                $table->string('dial_code_search', 20)->nullable()->after('dial_code');
+                $table->string('dial_code_search', 20)->nullable();
             }
         });
 
@@ -19,10 +21,17 @@ return new class extends Migration {
             SET dial_code_search = NULLIF(REGEXP_REPLACE(COALESCE(dial_code, ''), '[^0-9]', ''), '')
         ");
 
-        Schema::table('countries', function (Blueprint $table) {
-            $this->ensureIndex($table, 'countries', ['status', 'code'], 'countries_status_code_index');
-            $this->ensureIndex($table, 'countries', ['status', 'dial_code_search'], 'countries_status_dial_code_search_index');
-        });
+        if (!$this->hasIndex('countries', 'countries_status_code_index', $driver)) {
+            Schema::table('countries', function (Blueprint $table) {
+                $table->index(['status', 'code'], 'countries_status_code_index');
+            });
+        }
+
+        if (!$this->hasIndex('countries', 'countries_status_dial_code_search_index', $driver)) {
+            Schema::table('countries', function (Blueprint $table) {
+                $table->index(['status', 'dial_code_search'], 'countries_status_dial_code_search_index');
+            });
+        }
     }
 
     public function down(): void
@@ -42,15 +51,16 @@ return new class extends Migration {
         });
     }
 
-    private function ensureIndex(Blueprint $table, string $tableName, array $columns, string $indexName): void
+    private function hasIndex(string $tableName, string $indexName, string $driver): bool
     {
-        if (!$this->hasIndex($tableName, $indexName)) {
-            $table->index($columns, $indexName);
+        if ($driver === 'pgsql') {
+            return DB::table('pg_indexes')
+                ->where('schemaname', DB::getConfig('search_path') ?: 'public')
+                ->where('tablename', $tableName)
+                ->where('indexname', $indexName)
+                ->exists();
         }
-    }
 
-    private function hasIndex(string $tableName, string $indexName): bool
-    {
         $database = DB::getDatabaseName();
 
         return DB::table('information_schema.statistics')

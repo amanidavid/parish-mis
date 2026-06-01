@@ -10,13 +10,13 @@ use App\Http\Requests\Api\App\V1\UpdateTenantUserRequest;
 use App\Http\Resources\App\V1\TenantUserResource;
 use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\UserTenant;
+use App\Models\Tenant\Role;
 use App\Models\Tenant\User;
 use App\Services\V1\StaffProvisioningService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Spatie\Permission\Models\Role;
 
 class TenantUserController extends Controller
 {

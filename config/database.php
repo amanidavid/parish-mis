@@ -3,6 +3,35 @@
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
+$configuredConnection = env('DB_CONNECTION', 'base');
+$supportedDrivers = ['sqlite', 'mysql', 'mariadb', 'pgsql', 'sqlsrv'];
+$databaseEngine = env('DB_ENGINE', in_array($configuredConnection, $supportedDrivers, true) ? $configuredConnection : 'mysql');
+$defaultConnection = env(
+    'DB_DEFAULT_CONNECTION',
+    in_array($configuredConnection, $supportedDrivers, true) ? 'base' : $configuredConnection
+);
+
+$landlordHost = env('LANDLORD_DB_HOST', env('BASE_DB_HOST', env('DB_HOST', '127.0.0.1')));
+$landlordPort = env('LANDLORD_DB_PORT', env('BASE_DB_PORT', $databaseEngine === 'pgsql' ? '5432' : '3306'));
+$landlordDatabase = env('LANDLORD_DB_DATABASE', env('BASE_DB_DATABASE', 'base'));
+$landlordUsername = env('LANDLORD_DB_USERNAME', env('BASE_DB_USERNAME', env('DB_USERNAME', 'root')));
+$landlordPassword = env('LANDLORD_DB_PASSWORD', env('BASE_DB_PASSWORD', env('DB_PASSWORD', '')));
+$landlordSocket = env('LANDLORD_DB_SOCKET', env('BASE_DB_SOCKET', env('DB_SOCKET', '')));
+$landlordCharset = env('LANDLORD_DB_CHARSET', env('BASE_DB_CHARSET', $databaseEngine === 'pgsql' ? 'utf8' : env('DB_CHARSET', 'utf8mb4')));
+$landlordCollation = env('LANDLORD_DB_COLLATION', env('BASE_DB_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci')));
+$landlordSslMode = env('LANDLORD_DB_SSLMODE', env('BASE_DB_SSLMODE', env('DB_SSLMODE', 'prefer')));
+
+$tenantHost = env('TENANT_DB_HOST', env('DB_HOST', '127.0.0.1'));
+$tenantPort = env('TENANT_DB_PORT', $databaseEngine === 'pgsql' ? '5432' : env('DB_PORT', '3306'));
+$tenantDatabase = env('TENANT_DB_DATABASE', env('DB_DATABASE', 'laravel'));
+$tenantUsername = env('TENANT_DB_USERNAME', env('DB_USERNAME', 'root'));
+$tenantPassword = env('TENANT_DB_PASSWORD', env('DB_PASSWORD', ''));
+$tenantSocket = env('TENANT_DB_SOCKET', env('DB_SOCKET', ''));
+$tenantCharset = env('TENANT_DB_CHARSET', $databaseEngine === 'pgsql' ? 'utf8' : env('DB_CHARSET', 'utf8mb4'));
+$tenantCollation = env('TENANT_DB_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci'));
+$tenantSearchPath = env('TENANT_DB_SEARCH_PATH', env('DB_SEARCH_PATH', 'public'));
+$tenantSslMode = env('TENANT_DB_SSLMODE', env('DB_SSLMODE', 'prefer'));
+
 return [
 
     /*
@@ -17,7 +46,7 @@ return [
     |
     */
 
-    'default' => env('DB_CONNECTION', 'sqlite'),
+    'default' => $defaultConnection,
 
     /*
     |--------------------------------------------------------------------------
@@ -65,42 +94,45 @@ return [
         ],
 
         'base' => [
-            'driver' => 'mysql',
+            'driver' => $databaseEngine,
             'url' => env('BASE_DB_URL', env('LANDLORD_DB_URL')),
-            'host' => env('BASE_DB_HOST', env('LANDLORD_DB_HOST', env('DB_HOST', '127.0.0.1'))),
-            'port' => env('BASE_DB_PORT', env('LANDLORD_DB_PORT', env('DB_PORT', '3306'))),
-            'database' => env('BASE_DB_DATABASE', env('LANDLORD_DB_DATABASE', 'base')),
-            'username' => env('BASE_DB_USERNAME', env('LANDLORD_DB_USERNAME', env('DB_USERNAME', 'root'))),
-            'password' => env('BASE_DB_PASSWORD', env('LANDLORD_DB_PASSWORD', env('DB_PASSWORD', ''))),
-            'unix_socket' => env('BASE_DB_SOCKET', env('LANDLORD_DB_SOCKET', '')),
-            'charset' => env('BASE_DB_CHARSET', env('LANDLORD_DB_CHARSET', env('DB_CHARSET', 'utf8mb4'))),
-            'collation' => env('BASE_DB_COLLATION', env('LANDLORD_DB_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci'))),
+            'host' => $landlordHost,
+            'port' => $landlordPort,
+            'database' => $landlordDatabase,
+            'username' => $landlordUsername,
+            'password' => $landlordPassword,
+            'unix_socket' => $databaseEngine === 'mysql' ? $landlordSocket : '',
+            'charset' => $landlordCharset,
+            'collation' => $databaseEngine === 'mysql' ? $landlordCollation : null,
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
+            'search_path' => $databaseEngine === 'pgsql' ? env('LANDLORD_DB_SEARCH_PATH', env('BASE_DB_SEARCH_PATH', 'public')) : 'public',
+            'sslmode' => $databaseEngine === 'pgsql' ? $landlordSslMode : 'prefer',
+            'options' => $databaseEngine === 'mysql' && extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
         ],
 
-        // Backward compatibility; consider removing once all references are updated
-        'landlord' => [
-            'driver' => 'mysql',
-            'url' => env('LANDLORD_DB_URL', env('BASE_DB_URL')),
-            'host' => env('LANDLORD_DB_HOST', env('BASE_DB_HOST', env('DB_HOST', '127.0.0.1'))),
-            'port' => env('LANDLORD_DB_PORT', env('BASE_DB_PORT', env('DB_PORT', '3306'))),
-            'database' => env('LANDLORD_DB_DATABASE', env('BASE_DB_DATABASE', 'base')),
-            'username' => env('LANDLORD_DB_USERNAME', env('BASE_DB_USERNAME', env('DB_USERNAME', 'root'))),
-            'password' => env('LANDLORD_DB_PASSWORD', env('BASE_DB_PASSWORD', env('DB_PASSWORD', ''))),
-            'unix_socket' => env('LANDLORD_DB_SOCKET', env('BASE_DB_SOCKET', '')),
-            'charset' => env('LANDLORD_DB_CHARSET', env('BASE_DB_CHARSET', env('DB_CHARSET', 'utf8mb4'))),
-            'collation' => env('LANDLORD_DB_COLLATION', env('BASE_DB_COLLATION', env('DB_COLLATION', 'utf8mb4_unicode_ci'))),
+        'tenant' => [
+            'driver' => $databaseEngine,
+            'url' => env('TENANT_DB_URL'),
+            'host' => $tenantHost,
+            'port' => $tenantPort,
+            'database' => $tenantDatabase,
+            'username' => $tenantUsername,
+            'password' => $tenantPassword,
+            'unix_socket' => $databaseEngine === 'mysql' ? $tenantSocket : '',
+            'charset' => $tenantCharset,
+            'collation' => $databaseEngine === 'mysql' ? $tenantCollation : null,
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
+            'search_path' => $databaseEngine === 'pgsql' ? $tenantSearchPath : 'public',
+            'sslmode' => $databaseEngine === 'pgsql' ? $tenantSslMode : 'prefer',
+            'options' => $databaseEngine === 'mysql' && extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
         ],

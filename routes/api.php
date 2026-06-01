@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\App\V1\AccessControlController;
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
 use App\Http\Controllers\Api\App\V1\CustomerContractController;
 use App\Http\Controllers\Api\App\V1\CustomerController;
+use App\Http\Controllers\Api\App\V1\ContractReportController;
 use App\Http\Controllers\Api\App\V1\DashboardReportController;
 use App\Http\Controllers\Api\App\V1\LocationController;
 use App\Http\Controllers\Api\App\V1\PropertyController;
@@ -73,6 +74,11 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['tenant', 'jwt.auth'])->group(function () {
                 Route::get('auth/me', [AppAuthController::class, 'me']);
                 Route::get('reports/dashboard-overview', [DashboardReportController::class, 'overview']);
+                Route::prefix('reports/contracts')->group(function () {
+                    Route::get('summary', [ContractReportController::class, 'summary']);
+                    Route::get('by-property', [ContractReportController::class, 'byProperty']);
+                    Route::get('expiring', [ContractReportController::class, 'expiring']);
+                });
                 Route::get('workspace/subscription', [WorkspaceController::class, 'subscription']);
                 Route::post('workspace/subscription/billing-profile/preview', [WorkspaceController::class, 'previewBillingProfileChange']);
                 Route::get('workspace/subscription/properties', [WorkspaceController::class, 'subscriptionProperties']);

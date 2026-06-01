@@ -10,6 +10,25 @@ abstract class BaseModel extends Model
 {
     protected $guarded = [];
 
+    public function getConnectionName(): ?string
+    {
+        if ($this->connection !== null) {
+            return $this->connection;
+        }
+
+        $class = static::class;
+
+        if (str_starts_with($class, 'App\\Models\\Tenant\\')) {
+            return (string) config('multitenancy.tenant_database_connection_name', 'tenant');
+        }
+
+        if (str_starts_with($class, 'App\\Models\\Landlord\\')) {
+            return 'base';
+        }
+
+        return parent::getConnectionName();
+    }
+
     protected static function booted(): void
     {
         static::creating(function ($model) {

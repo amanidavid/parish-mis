@@ -4,13 +4,13 @@ namespace App\Services\V1;
 
 use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\UserTenant;
+use App\Models\Tenant\Role;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Spatie\Permission\Models\Role;
 
 class StaffProvisioningService
 {
@@ -18,7 +18,7 @@ class StaffProvisioningService
     {
         $password = $data['password'] ?? $this->generateTemporaryPassword();
         $username = $this->resolveUniqueUsername($data['username'] ?? null, $data['name']);
-        $roles = $this->resolveRoleNames($data['roles'] ?? ['viewer']);
+        $roles = $this->resolveRoleNames($data['roles'] ?? ['manager']);
 
         $this->guardAgainstWorkspaceStaffConflicts($data['phone'], $data['email'] ?? null);
 
@@ -105,7 +105,7 @@ class StaffProvisioningService
             ->values()
             ->all();
 
-        $normalized = $normalized === [] ? ['viewer'] : $normalized;
+        $normalized = $normalized === [] ? ['manager'] : $normalized;
         if (in_array('owner', $normalized, true)) {
             throw new \InvalidArgumentException('Owner role cannot be assigned through staff provisioning.');
         }

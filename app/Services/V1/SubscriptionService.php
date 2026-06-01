@@ -496,7 +496,7 @@ class SubscriptionService
             ->leftJoin('units', 'units.property_floor_id', '=', 'property_floors.id')
             ->groupBy('properties.id');
 
-        return DB::query()
+        return $this->tenantQuery()
             ->fromSub($propertyUsage, 'property_usage')
             ->select([
                 'registered_units',
@@ -656,5 +656,15 @@ class SubscriptionService
                 $currentTenant->makeCurrent();
             }
         }
+    }
+
+    private function tenantQuery(): \Illuminate\Database\Query\Builder
+    {
+        return DB::connection($this->tenantConnectionName())->query();
+    }
+
+    private function tenantConnectionName(): string
+    {
+        return (string) config('multitenancy.tenant_database_connection_name', 'tenant');
     }
 }

@@ -23,6 +23,7 @@ class LocationSeeder extends Seeder
         'wards' => ['wards.json', 'wards.php'],
     ];
     private const UPSERT_CHUNK_SIZE = 500;
+    private const DUPLICATE_WARNING_SAMPLE_SIZE = 5;
 
     public function run(): void
     {
@@ -161,6 +162,8 @@ class LocationSeeder extends Seeder
             ];
         }
 
+        $payload = $this->deduplicateByNaturalKey('countries', $payload, ['name']);
+
         $this->upsertByLegacyId('countries', $payload, ['uuid', 'name', 'dial_code', 'dial_code_search', 'code', 'status', 'updated_at']);
 
         return Country::query()
@@ -205,6 +208,8 @@ class LocationSeeder extends Seeder
                 'updated_at' => $this->normalizeTimestamp($record['updated_at'] ?? null, $timestamp),
             ];
         }
+
+        $payload = $this->deduplicateByNaturalKey('regions', $payload, ['country_id', 'name']);
 
         $this->upsertByLegacyId('regions', $payload, ['uuid', 'country_id', 'name', 'post_code', 'status', 'updated_at']);
 
@@ -251,6 +256,8 @@ class LocationSeeder extends Seeder
             ];
         }
 
+        $payload = $this->deduplicateByNaturalKey('districts', $payload, ['region_id', 'name']);
+
         $this->upsertByLegacyId('districts', $payload, ['uuid', 'region_id', 'name', 'post_code', 'status', 'updated_at']);
 
         return District::query()
@@ -295,6 +302,8 @@ class LocationSeeder extends Seeder
             ];
         }
 
+        $payload = $this->deduplicateByNaturalKey('wards', $payload, ['district_id', 'name']);
+
         $this->upsertByLegacyId('wards', $payload, ['uuid', 'district_id', 'name', 'post_code', 'status', 'updated_at']);
     }
 
@@ -313,6 +322,94 @@ class LocationSeeder extends Seeder
             ->each(function (Collection $chunk) use ($table, $updateColumns): void {
                 DB::table($table)->upsert($chunk->all(), ['legacy_id'], $updateColumns);
             });
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $rows
+     * @param array<int, string> $keyColumns
+     * @return array<int, array<string, mixed>>
+     */
+    private function deduplicateByNaturalKey(string $table, array $rows, array $keyColumns): array
+    {
+        $uniqueRows = [];
+        $naturalKeys = [];
+        $duplicateSamples = [];
+
+        foreach ($rows as $row) {
+            $legacyId = $this->nullableInt($row['legacy_id'] ?? null);
+            $legacyKey = $legacyId === null ? null : (string) $legacyId;
+            $naturalKey = $this->buildNaturalKey($row, $keyColumns);
+
+            if ($legacyKey !== null && array_key_exists($legacyKey, $uniqueRows)) {
+                $uniqueRows[$legacyKey] = $row;
+                continue;
+            }
+
+            if ($naturalKey !== null && isset($naturalKeys[$naturalKey])) {
+                if (count($duplicateSamples) < self::DUPLICATE_WARNING_SAMPLE_SIZE) {
+                    $duplicateSamples[] = sprintf(
+                        'legacy_id %s conflicts with legacy_id %s on [%s]',
+                        $legacyKey ?? 'unknown',
+                        $naturalKeys[$naturalKey]['legacy_id'] ?? 'unknown',
+                        $this->describeNaturalKey($row, $keyColumns)
+                    );
+                }
+
+                continue;
+            }
+
+            if ($legacyKey !== null) {
+                $uniqueRows[$legacyKey] = $row;
+            } else {
+                $uniqueRows[] = $row;
+            }
+
+            if ($naturalKey !== null) {
+                $naturalKeys[$naturalKey] = $row;
+            }
+        }
+
+        if ($duplicateSamples !== []) {
+            $this->command?->warn(sprintf(
+                'Tenant location seed skipped duplicate %s rows that conflict with unique keys: %s',
+                $table,
+                implode('; ', $duplicateSamples)
+            ));
+        }
+
+        return array_values($uniqueRows);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<int, string> $keyColumns
+     */
+    private function buildNaturalKey(array $row, array $keyColumns): ?string
+    {
+        $parts = [];
+
+        foreach ($keyColumns as $column) {
+            $value = $row[$column] ?? null;
+
+            if ($value === null || $value === '') {
+                return null;
+            }
+
+            $parts[] = (string) $value;
+        }
+
+        return implode('|', $parts);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @param array<int, string> $keyColumns
+     */
+    private function describeNaturalKey(array $row, array $keyColumns): string
+    {
+        return collect($keyColumns)
+            ->map(fn (string $column): string => sprintf('%s=%s', $column, (string) ($row[$column] ?? 'null')))
+            ->implode(', ');
     }
 
     private function normalizeName(mixed $value): ?string

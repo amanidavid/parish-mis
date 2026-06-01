@@ -9,7 +9,7 @@ return new class extends Migration {
     {
         Schema::table('properties', function (Blueprint $table) {
             if (!Schema::hasColumn('properties', 'ward_id')) {
-                $table->foreignId('ward_id')->nullable()->after('district_id')->constrained('wards')->nullOnDelete();
+                $table->foreignId('ward_id')->nullable()->constrained('wards')->nullOnDelete();
                 $table->index(['ward_id', 'status']);
             }
         });
