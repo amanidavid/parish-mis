@@ -52,6 +52,22 @@ class JwtAuth
 
             $tenant = $request->attributes->get('tenant');
             if ($tenant) {
+                $provisioningStatus = (string) ($tenant->provisioning_status ?? '');
+                if (in_array($provisioningStatus, ['pending', 'provisioning'], true)) {
+                    return ApiResponse::error(
+                        'Your workspace is still being set up. Please wait a moment.',
+                        ['provisioning_status' => $provisioningStatus],
+                        503
+                    );
+                }
+                if ($provisioningStatus === 'failed') {
+                    return ApiResponse::error(
+                        'Workspace provisioning failed. Please contact support.',
+                        ['provisioning_status' => 'failed'],
+                        503
+                    );
+                }
+
                 $tenantUser = TenantUser::query()->where('base_user_id', $baseUser->id)->first();
                 if (!$tenantUser) {
                     throw new \Exception('Tenant user profile not found for this workspace');

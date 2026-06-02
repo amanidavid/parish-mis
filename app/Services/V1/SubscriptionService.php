@@ -10,6 +10,7 @@ use App\Models\Landlord\SubscriptionUsage;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
 use App\Models\Tenancy\Tenant;
+use App\Support\Tenancy\TenantConnectionManager;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -28,7 +29,10 @@ class SubscriptionService
     /** Only these subscription states are considered open for provisioning-time reuse. */
     private const OPEN_SUBSCRIPTION_STATUSES = ['trialing', 'active'];
 
-    public function __construct(private BillingProfileService $billingProfileService)
+    public function __construct(
+        private BillingProfileService $billingProfileService,
+        private TenantConnectionManager $tenantConnectionManager
+    )
     {
     }
 
@@ -134,12 +138,7 @@ class SubscriptionService
                 ->first()
             : null;
         $summaryUsage = $this->runInTenantContext($tenant, function () use ($billingProfile) {
-            $counts = $this->calculateWorkspaceInventoryTotals();
-
-            return [
-                ...$counts,
-                'estimated_total_price_cents' => $this->estimateWorkspaceTotalPrice($billingProfile),
-            ];
+            return $this->calculateUsageSummary($billingProfile);
         });
 
         $subscriptionState = $this->resolveSubscriptionState($subscription);
@@ -368,11 +367,33 @@ class SubscriptionService
         throw new \RuntimeException('No active subscription plan is configured. Seed the landlord plans table before provisioning tenants.');
     }
 
+    /**
+     * Single tenant DB round-trip: derive property count, unit total, and estimated price
+     * all from the same grouped frequencies query — replaces the previous 3 separate queries.
+     */
+    private function calculateUsageSummary(?BillingProfile $billingProfile): array
+    {
+        $frequencies = $this->propertyRegisteredUnitFrequencies();
+
+        $totalProperties = (int) $frequencies->sum('properties_count');
+        $totalUnits = (int) $frequencies->sum(
+            fn (object $row) => (int) $row->registered_units * (int) $row->properties_count
+        );
+        $estimatedPrice = $this->estimateTotalPriceFromFrequencies($frequencies, $billingProfile);
+
+        return [
+            'total_properties'           => $totalProperties,
+            'total_units'                => $totalUnits,
+            'estimated_total_price_cents' => $estimatedPrice,
+        ];
+    }
+
+    /** @deprecated Use calculateUsageSummary() which runs a single query instead of two. */
     private function calculateWorkspaceInventoryTotals(): array
     {
         return [
             'total_properties' => Property::query()->count(),
-            'total_units' => Unit::query()->count(),
+            'total_units'      => Unit::query()->count(),
         ];
     }
 
@@ -473,16 +494,6 @@ class SubscriptionService
             'expires_at' => $expiresAt,
             'is_current_period_active' => $isCurrentPeriodActive,
         ];
-    }
-
-    private function estimateWorkspaceTotalPrice(?BillingProfile $billingProfile): int
-    {
-        if (!$billingProfile) {
-            return 0;
-        }
-
-        $frequencies = $this->propertyRegisteredUnitFrequencies();
-        return $this->estimateTotalPriceFromFrequencies($frequencies, $billingProfile);
     }
 
     private function propertyRegisteredUnitFrequencies(): Collection
@@ -642,19 +653,19 @@ class SubscriptionService
         $currentTenant = Tenant::current();
 
         if ($currentTenant?->id === $tenant->id) {
+            $this->tenantConnectionManager->activateTenant($tenant);
+
             return $callback();
         }
 
-        $tenant->makeCurrent();
+        $this->tenantConnectionManager->activateTenant($tenant);
 
         try {
             return $callback();
         } finally {
-            Tenant::forgetCurrent();
-
-            if ($currentTenant && $currentTenant->id !== $tenant->id) {
-                $currentTenant->makeCurrent();
-            }
+            $this->tenantConnectionManager->restoreTenant(
+                $currentTenant && $currentTenant->id !== $tenant->id ? $currentTenant : null
+            );
         }
     }
 
@@ -665,6 +676,6 @@ class SubscriptionService
 
     private function tenantConnectionName(): string
     {
-        return (string) config('multitenancy.tenant_database_connection_name', 'tenant');
+        return $this->tenantConnectionManager->connectionName();
     }
 }

@@ -6,11 +6,17 @@ use App\Http\Controllers\Api\Admin\V1\Concerns\InteractsWithTenantAdminModels;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Admin\V1\TenantIndexRequest;
 use App\Http\Requests\Api\Admin\V1\AssignTenantBillingProfileRequest;
+use App\Http\Requests\Api\Admin\V1\TenantContractsSummaryRequest;
+use App\Http\Requests\Api\Admin\V1\TenantPropertyLocationBreakdownRequest;
+use App\Http\Requests\Api\Admin\V1\TenantPropertyLocationSummaryRequest;
+use App\Http\Requests\Api\Admin\V1\TenantPropertyOverviewRequest;
 use App\Http\Requests\Api\Admin\V1\TenantStaffIndexRequest;
 use App\Http\Requests\Api\Admin\V1\TenantSubscriptionPropertyIndexRequest;
 use App\Http\Requests\Api\Admin\V1\TenantStoreRequest;
 use App\Http\Requests\Api\Admin\V1\TenantStatusUpdateRequest;
 use App\Http\Requests\Api\Admin\V1\TenantSubscriptionStatusUpdateRequest;
+use App\Http\Resources\Admin\V1\TenantPropertyLocationBreakdownResource;
+use App\Http\Resources\Admin\V1\TenantPropertyOverviewResource;
 use App\Http\Resources\Admin\V1\TenantResource;
 use App\Http\Resources\App\V1\TenantUserResource;
 use App\Http\Resources\App\V1\WorkspaceSubscriptionPropertyResource;
@@ -22,6 +28,7 @@ use App\Models\Tenant\User;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\SubscriptionBillingProfileChangeService;
 use App\Services\V1\SubscriptionService;
+use App\Services\V1\TenantAdminInsightService;
 use App\Services\V1\TenantProvisioningService;
 use App\Services\V1\WorkspaceService;
 use App\Support\ApiResponse;
@@ -33,6 +40,7 @@ class TenantController extends Controller
 
     public function __construct(
         private SubscriptionService $subscriptionService,
+        private TenantAdminInsightService $tenantAdminInsightService,
         private SubscriptionBillingProfileChangeService $subscriptionBillingProfileChangeService,
         private TenantProvisioningService $tenantProvisioningService,
         private WorkspaceService $workspaceService,
@@ -44,7 +52,22 @@ class TenantController extends Controller
     public function index(TenantIndexRequest $request)
     {
         $filters = $request->validated();
-        $query = Tenant::query();
+        $query = Tenant::query()->select([
+            'id',
+            'uuid',
+            'name',
+            'display_name',
+            'database',
+            'status',
+            'provisioning_status',
+            'provision_attempts',
+            'provision_error',
+            'provision_started_at',
+            'provisioned_at',
+            'meta',
+            'created_at',
+            'updated_at',
+        ]);
 
         if (!empty($filters['search'] ?? null)) {
             $query->where('name', 'like', $filters['search'].'%');
@@ -192,6 +215,142 @@ class TenantController extends Controller
             WorkspaceSubscriptionPropertyResource::collection($properties),
             'Workspace subscription property breakdown retrieved successfully.'
         );
+    }
+
+    /** Return the core operational counts that describe how a workspace is being used right now. */
+    public function operationalSummary(Tenant $tenant)
+    {
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
+
+        $operational = $this->runInTenantContext($tenant, fn () => $this->tenantAdminInsightService->operationalSummary());
+        $subscription = $this->subscriptionService->getWorkspaceSubscriptionSummary($tenant);
+
+        return ApiResponse::success('Tenant operational summary retrieved successfully.', [
+            'workspace' => [
+                'uuid' => $tenant->uuid,
+                'name' => $tenant->name,
+                'display_name' => $tenant->display_name,
+                'database' => $tenant->database,
+                'status' => $tenant->status,
+                'provisioning_status' => $tenant->provisioning_status,
+                'access_state' => $subscription['access_state'] ?? null,
+                'access_message' => $subscription['access_message'] ?? null,
+                'inventory_changes_allowed' => $subscription['inventory_changes_allowed'] ?? null,
+                'subscription' => $subscription['subscription'] ?? null,
+            ],
+            'operational' => $operational,
+        ]);
+    }
+
+    /** Return grouped property totals across country, region, district, and ward for one workspace. */
+    public function propertyLocationSummary(TenantPropertyLocationSummaryRequest $request, Tenant $tenant)
+    {
+        $summary = $this->runInTenantContext(
+            $tenant,
+            fn () => $this->tenantAdminInsightService->propertyLocationSummary($request->validated())
+        );
+
+        return ApiResponse::success('Tenant property location summary retrieved successfully.', $summary);
+    }
+
+    /** Return one paginated location level so admin screens can drill into countries, regions, districts, or wards. */
+    public function propertyLocationBreakdown(TenantPropertyLocationBreakdownRequest $request, Tenant $tenant)
+    {
+        $breakdown = $this->runInTenantContext(
+            $tenant,
+            fn () => $this->tenantAdminInsightService->propertyLocationBreakdown($request->validated())
+        );
+
+        $rows = $breakdown['rows'];
+
+        return ApiResponse::success('Tenant property location breakdown retrieved successfully.', [
+            'group_by' => $breakdown['group_by'],
+            'filters' => $breakdown['filters'],
+            'totals' => $breakdown['totals'],
+            'data' => TenantPropertyLocationBreakdownResource::collection($rows->getCollection())->resolve(),
+            'links' => [
+                'first' => $rows->url(1),
+                'last' => $rows->url($rows->lastPage()),
+                'prev' => $rows->previousPageUrl(),
+                'next' => $rows->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $rows->currentPage(),
+                'from' => $rows->firstItem(),
+                'last_page' => $rows->lastPage(),
+                'path' => $rows->path(),
+                'per_page' => $rows->perPage(),
+                'to' => $rows->lastItem(),
+                'total' => $rows->total(),
+            ],
+        ]);
+    }
+
+    /** Return paginated properties with operational rollups for admin workspace inspection screens. */
+    public function properties(TenantPropertyOverviewRequest $request, Tenant $tenant)
+    {
+        $properties = $this->runInTenantContext(
+            $tenant,
+            fn () => $this->tenantAdminInsightService->propertyOverview($request->validated())
+        );
+
+        return ApiResponse::success('Tenant properties overview retrieved successfully.', [
+            'data' => TenantPropertyOverviewResource::collection($properties->getCollection())->resolve(),
+            'links' => [
+                'first' => $properties->url(1),
+                'last' => $properties->url($properties->lastPage()),
+                'prev' => $properties->previousPageUrl(),
+                'next' => $properties->nextPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $properties->currentPage(),
+                'from' => $properties->firstItem(),
+                'last_page' => $properties->lastPage(),
+                'path' => $properties->path(),
+                'per_page' => $properties->perPage(),
+                'to' => $properties->lastItem(),
+                'total' => $properties->total(),
+            ],
+        ]);
+    }
+
+    /** Return contract totals and status breakdowns for admin workspace monitoring. */
+    public function contractsSummary(TenantContractsSummaryRequest $request, Tenant $tenant)
+    {
+        $summary = $this->runInTenantContext(
+            $tenant,
+            fn () => $this->tenantAdminInsightService->contractsSummary($request->validated())
+        );
+
+        return ApiResponse::success('Tenant contracts summary retrieved successfully.', $summary);
+    }
+
+    /** Return a compact staff status summary without loading individual members. */
+    public function staffSummary(Tenant $tenant)
+    {
+        $summary = $this->runInTenantContext(
+            $tenant,
+            fn () => $this->tenantAdminInsightService->staffSummary()
+        );
+
+        return ApiResponse::success('Tenant staff summary retrieved successfully.', $summary);
+    }
+
+    /** Return the effective workspace access state after billing and status rules are applied. */
+    public function accessState(Tenant $tenant)
+    {
+        $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
+        $summary = $this->subscriptionService->getWorkspaceSubscriptionSummary($tenant);
+
+        return ApiResponse::success('Tenant access state retrieved successfully.', [
+            'workspace_uuid' => $tenant->uuid,
+            'workspace_status' => $tenant->status,
+            'provisioning_status' => $tenant->provisioning_status,
+            'access_state' => $summary['access_state'] ?? null,
+            'access_message' => $summary['access_message'] ?? null,
+            'inventory_changes_allowed' => $summary['inventory_changes_allowed'] ?? null,
+            'subscription' => $summary['subscription'] ?? null,
+        ]);
     }
 
     /** Suspend or reactivate a workspace at the tenant record level. */

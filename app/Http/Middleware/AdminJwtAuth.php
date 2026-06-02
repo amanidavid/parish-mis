@@ -2,13 +2,13 @@
 
 namespace App\Http\Middleware;
 
-use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\SystemAdmin;
 use App\Services\V1\JwtService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 
 
 class AdminJwtAuth
@@ -43,14 +43,51 @@ class AdminJwtAuth
         try {
             $payload = $this->jwtService->decodeToken($jwt);
             $userUuid = (string) ($payload['sub'] ?? '');
-            $user = BaseUser::query()->where('uuid', $userUuid)->first();
-            if (!$user) {
+
+            if ($userUuid === '') {
                 throw new \Exception('User not found');
             }
-            $admin = SystemAdmin::query()->where('user_id', $user->id)->first();
-            if (!$admin) {
+
+            $session = SystemAdmin::query()
+                ->join('users', 'users.id', '=', 'system_admins.user_id')
+                ->where('users.uuid', $userUuid)
+                ->select([
+                    'users.id as user_id',
+                    'users.uuid as user_uuid',
+                    'users.username',
+                    'users.name',
+                    'users.email',
+                    'users.phone',
+                    'system_admins.id as admin_id',
+                    'system_admins.uuid as admin_uuid',
+                    'system_admins.super as admin_super',
+                    'system_admins.scopes as admin_scopes',
+                ])
+                ->first();
+
+            if (!$session) {
                 throw new \Exception('System administrator access is required');
             }
+
+            $user = (object) [
+                'id' => (int) $session->user_id,
+                'uuid' => $session->user_uuid,
+                'username' => $session->username,
+                'name' => $session->name,
+                'email' => $session->email,
+                'phone' => $session->phone,
+            ];
+
+            $adminScopes = is_string($session->admin_scopes)
+                ? (json_decode($session->admin_scopes, true) ?: [])
+                : Arr::wrap($session->admin_scopes);
+
+            $admin = (object) [
+                'id' => (int) $session->admin_id,
+                'uuid' => $session->admin_uuid,
+                'super' => (bool) $session->admin_super,
+                'scopes' => $adminScopes,
+            ];
 
             $request->attributes->set('admin_user', $user);
             $request->attributes->set('system_admin', $admin);

@@ -7,6 +7,7 @@ use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
+use App\Support\Tenancy\TenantConnectionManager;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -15,9 +16,10 @@ use Spatie\Permission\PermissionRegistrar;
 
 class TenantProvisioningService
 {
-    private const DEFAULT_TENANT_CONNECTION = 'tenant';
-
-    public function __construct(private SubscriptionService $subscriptionService)
+    public function __construct(
+        private SubscriptionService $subscriptionService,
+        private TenantConnectionManager $tenantConnectionManager
+    )
     {
     }
 
@@ -30,9 +32,9 @@ class TenantProvisioningService
     {
         $tenant = Tenant::query()->findOrFail($tenantId);
         $owner = BaseUser::query()->findOrFail($ownerId);
-        $tenantConnectionName = $this->tenantConnectionName();
+        $tenantConnectionName = $this->tenantConnectionManager->connectionName();
         $tenantDriver = (string) config(sprintf('database.connections.%s.driver', $tenantConnectionName), 'mysql');
-        $originalTenantDatabase = config(sprintf('database.connections.%s.database', $tenantConnectionName));
+        $originalTenant = Tenant::current();
 
         if ($tenant->provisioning_status === 'ready') {
             return;
@@ -48,9 +50,7 @@ class TenantProvisioningService
             $this->createTenantDatabase($tenant->database, $tenantConnectionName, $tenantDriver);
             $this->log($tenant->id, 'processing', 'database_created', 'Tenant database is ready');
 
-            DB::purge($tenantConnectionName);
-            config([sprintf('database.connections.%s.database', $tenantConnectionName) => $tenant->database]);
-            DB::reconnect($tenantConnectionName);
+            $this->tenantConnectionManager->activateTenant($tenant);
 
             $this->assertTenantDatabaseSelected($tenant->database, $tenantConnectionName, $tenantDriver);
 
@@ -67,8 +67,6 @@ class TenantProvisioningService
                 '--force' => true,
             ], $tenant->id, 'seeders');
             $this->log($tenant->id, 'processing', 'seeded', 'Tenant seeders completed');
-
-            $tenant->makeCurrent();
 
             $tenantUser = TenantUser::on($tenantConnectionName)->firstOrCreate(
                 ['base_user_id' => $owner->id],
@@ -127,10 +125,7 @@ class TenantProvisioningService
 
             throw $exception;
         } finally {
-            Tenant::forgetCurrent();
-            DB::purge($tenantConnectionName);
-            config([sprintf('database.connections.%s.database', $tenantConnectionName) => $originalTenantDatabase]);
-            DB::reconnect($tenantConnectionName);
+            $this->tenantConnectionManager->restoreTenant($originalTenant);
         }
     }
 
@@ -213,12 +208,6 @@ class TenantProvisioningService
                 : sprintf('Tenant %s failed with exit code %d.', $step, $exitCode)
         );
     }
-
-    private function tenantConnectionName(): string
-    {
-        return (string) config('multitenancy.tenant_database_connection_name', self::DEFAULT_TENANT_CONNECTION);
-    }
-
     private function createTenantDatabase(string $databaseName, string $tenantConnectionName, string $tenantDriver): void
     {
         if ($tenantDriver === 'pgsql') {

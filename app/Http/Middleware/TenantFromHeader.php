@@ -5,13 +5,17 @@ namespace App\Http\Middleware;
 use App\Models\Tenancy\Tenant;
 use App\Support\ApiMessages;
 use App\Tenancy\HeaderTenantFinder;
+use App\Support\Tenancy\TenantConnectionManager;
 use Closure;
-use Illuminate\Http\Request;
 use App\Support\ApiResponse;
+use Illuminate\Http\Request;
 
 class TenantFromHeader
 {
-    public function __construct(private HeaderTenantFinder $finder)
+    public function __construct(
+        private HeaderTenantFinder $finder,
+        private TenantConnectionManager $tenantConnectionManager
+    )
     {
     }
 
@@ -34,13 +38,13 @@ class TenantFromHeader
         }
 
         $request->attributes->set('tenant_uuid', $tenantUuid);
-        $tenant->makeCurrent();
+        $this->tenantConnectionManager->activateTenant($tenant);
         $request->attributes->set('tenant', $tenant);
 
         try {
             return $next($request);
         } finally {
-            Tenant::forgetCurrent();
+            $this->tenantConnectionManager->clearTenantContext();
         }
     }
 }

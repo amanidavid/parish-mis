@@ -28,7 +28,24 @@ class BillingProfileController extends Controller
     public function index(BillingProfileIndexRequest $request)
     {
         $filters = $request->validated();
-        $query = BillingProfile::query()->withCount('rules');
+        $query = BillingProfile::query()
+            ->select([
+                'id',
+                'uuid',
+                'name',
+                'description',
+                'billing_interval',
+                'trial_days',
+                'grace_days',
+                'currency',
+                'is_default',
+                'status',
+                'created_at',
+                'updated_at',
+            ])
+            ->withCount([
+                'rules' => static fn ($rulesQuery) => $rulesQuery->reorder(),
+            ]);
 
         if (!empty($filters['search'] ?? null)) {
             $query->where('name', 'like', $filters['search'].'%');

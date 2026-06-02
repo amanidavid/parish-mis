@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin\V1\Concerns;
 
 use App\Models\Tenancy\Tenant;
+use App\Support\Tenancy\TenantConnectionManager;
 use Illuminate\Database\Eloquent\Builder;
 
 trait InteractsWithTenantAdminModels
@@ -46,21 +47,25 @@ trait InteractsWithTenantAdminModels
     protected function runInTenantContext(Tenant $tenant, callable $callback): mixed
     {
         $currentTenant = Tenant::current();
+        $tenantConnectionManager = app(TenantConnectionManager::class);
 
         if ($currentTenant?->is($tenant)) {
+            $tenantConnectionManager->activateTenant($tenant);
+
             return $callback();
         }
 
-        $tenant->makeCurrent();
+        $tenantConnectionManager->activateTenant($tenant);
 
         try {
             return $callback();
         } finally {
-            Tenant::forgetCurrent();
-
-            if ($currentTenant) {
-                $currentTenant->makeCurrent();
-            }
+            $tenantConnectionManager->restoreTenant($currentTenant);
         }
+    }
+
+    protected function tenantConnectionName(): string
+    {
+        return app(TenantConnectionManager::class)->connectionName();
     }
 }

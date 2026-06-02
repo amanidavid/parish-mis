@@ -1,11 +1,11 @@
 <?php
 
 use App\Models\Tenancy\Tenant;
+use App\Support\Tenancy\TenantConnectionManager;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
-use Illuminate\Support\Facades\DB;
 
-$tenantConnectionName = (string) config('multitenancy.tenant_database_connection_name', 'tenant');
+$tenantConnectionName = app(TenantConnectionManager::class)->connectionName();
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -17,7 +17,7 @@ Artisan::command('tenants:migrate-existing {--tenant=} {--chunk=20}', function (
 
     $runMigration = function (Tenant $tenant) use ($tenantConnectionName): void {
         try {
-            $tenant->makeCurrent();
+            app(TenantConnectionManager::class)->activateTenant($tenant);
 
             $exitCode = Artisan::call('migrate', [
                 '--path' => 'database/migrations/tenant',
@@ -33,9 +33,7 @@ Artisan::command('tenants:migrate-existing {--tenant=} {--chunk=20}', function (
         } catch (Throwable $exception) {
             $this->error(sprintf('[FAIL] %s | %s | %s', $tenant->uuid, $tenant->database, $exception->getMessage()));
         } finally {
-            Tenant::forgetCurrent();
-            DB::purge($tenantConnectionName);
-            DB::reconnect($tenantConnectionName);
+            app(TenantConnectionManager::class)->clearTenantContext();
         }
     };
 
@@ -68,7 +66,7 @@ Artisan::command('tenants:seed-existing {--tenant=} {--chunk=20}', function () u
 
     $runSeeder = function (Tenant $tenant) use ($tenantConnectionName): void {
         try {
-            $tenant->makeCurrent();
+            app(TenantConnectionManager::class)->activateTenant($tenant);
 
             $exitCode = Artisan::call('db:seed', [
                 '--class' => 'Database\\Seeders\\Tenant\\TenantSeeder',
@@ -84,9 +82,7 @@ Artisan::command('tenants:seed-existing {--tenant=} {--chunk=20}', function () u
         } catch (Throwable $exception) {
             $this->error(sprintf('[FAIL] %s | %s | %s', $tenant->uuid, $tenant->database, $exception->getMessage()));
         } finally {
-            Tenant::forgetCurrent();
-            DB::purge($tenantConnectionName);
-            DB::reconnect($tenantConnectionName);
+            app(TenantConnectionManager::class)->clearTenantContext();
         }
     };
 

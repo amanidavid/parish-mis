@@ -117,10 +117,13 @@ return [
 
         'tenant' => [
             'driver' => $databaseEngine,
-            'url' => env('TENANT_DB_URL'),
+            // Keep tenant switching field-based so runtime database overrides are not
+            // silently ignored by an inherited URL-style DSN from the environment.
+            'url' => null,
             'host' => $tenantHost,
             'port' => $tenantPort,
             'database' => $tenantDatabase,
+            'bootstrap_database' => $tenantDatabase,
             'username' => $tenantUsername,
             'password' => $tenantPassword,
             'unix_socket' => $databaseEngine === 'mysql' ? $tenantSocket : '',

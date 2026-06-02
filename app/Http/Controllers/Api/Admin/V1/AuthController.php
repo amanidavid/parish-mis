@@ -6,9 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Admin\V1\AdminLoginRequest;
 use App\Http\Resources\Admin\V1\AdminSessionResource;
 use App\Models\Landlord\BaseUser;
-use App\Models\Landlord\SystemAdmin;
 use App\Services\V1\JwtService;
 use App\Support\ApiResponse;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
@@ -21,19 +21,49 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $query = BaseUser::query();
-        $user = !empty($data['username'] ?? null)
-            ? $query->where('username', $data['username'])->first()
-            : $query->where('email', $data['email'])->first();
+        $query = BaseUser::query()
+            ->join('system_admins', 'system_admins.user_id', '=', 'users.id')
+            ->select([
+                'users.id as user_id',
+                'users.uuid as user_uuid',
+                'users.username',
+                'users.name',
+                'users.email',
+                'users.phone',
+                'users.password',
+                'system_admins.id as admin_id',
+                'system_admins.uuid as admin_uuid',
+                'system_admins.super as admin_super',
+                'system_admins.scopes as admin_scopes',
+            ]);
 
-        if (!$user || !Hash::check($data['password'], (string) $user->password)) {
+        $session = !empty($data['username'] ?? null)
+            ? $query->where('users.username', $data['username'])->first()
+            : $query->where('users.email', $data['email'])->first();
+
+        if (!$session || !Hash::check($data['password'], (string) $session->password)) {
             return ApiResponse::error('Invalid credentials', ['auth' => ['The provided credentials are incorrect.']], 401);
         }
 
-        $admin = SystemAdmin::query()->where('user_id', $user->id)->first();
-        if (!$admin) {
-            return ApiResponse::error('Access denied', ['auth' => ['System administrator access is required.']], 403);
-        }
+        $user = (object) [
+            'id' => (int) $session->user_id,
+            'uuid' => $session->user_uuid,
+            'username' => $session->username,
+            'name' => $session->name,
+            'email' => $session->email,
+            'phone' => $session->phone,
+        ];
+
+        $adminScopes = is_string($session->admin_scopes)
+            ? (json_decode($session->admin_scopes, true) ?: [])
+            : Arr::wrap($session->admin_scopes);
+
+        $admin = (object) [
+            'id' => (int) $session->admin_id,
+            'uuid' => $session->admin_uuid,
+            'super' => (bool) $session->admin_super,
+            'scopes' => $adminScopes,
+        ];
 
         [$token, $expiresIn] = $this->jwt->issueAdminTokenForSubject((string) $user->uuid);
 

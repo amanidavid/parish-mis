@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\V1\AuthController as AdminAuthController;
 use App\Http\Controllers\Api\Admin\V1\BillingProfileController;
+use App\Http\Controllers\Api\Admin\V1\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Api\Admin\V1\TenantController;
 use App\Http\Controllers\Api\App\V1\AccessControlController;
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
@@ -30,6 +31,7 @@ Route::prefix('v1')->group(function () {
             });
 
             Route::middleware('admin.jwt.auth')->group(function () {
+                Route::get('platform/overview', [AdminDashboardController::class, 'overview']);
                 Route::get('billing-profiles', [BillingProfileController::class, 'index']);
                 Route::post('billing-profiles', [BillingProfileController::class, 'store']);
                 Route::get('billing-profiles/{billingProfile}', [BillingProfileController::class, 'show']);
@@ -41,6 +43,13 @@ Route::prefix('v1')->group(function () {
                 Route::post('tenants', [TenantController::class, 'store']);
                 Route::get('tenants/{tenant}', [TenantController::class, 'show']);
                 Route::get('tenants/{tenant}/staff', [TenantController::class, 'staff']);
+                Route::get('tenants/{tenant}/staff/summary', [TenantController::class, 'staffSummary']);
+                Route::get('tenants/{tenant}/operational-summary', [TenantController::class, 'operationalSummary']);
+                Route::get('tenants/{tenant}/access-state', [TenantController::class, 'accessState']);
+                Route::get('tenants/{tenant}/properties', [TenantController::class, 'properties']);
+                Route::get('tenants/{tenant}/properties/location-summary', [TenantController::class, 'propertyLocationSummary']);
+                Route::get('tenants/{tenant}/properties/location-breakdown', [TenantController::class, 'propertyLocationBreakdown']);
+                Route::get('tenants/{tenant}/contracts/summary', [TenantController::class, 'contractsSummary']);
                 Route::get('tenants/{tenant}/subscription', [TenantController::class, 'subscription']);
                 Route::get('tenants/{tenant}/subscription/properties', [TenantController::class, 'subscriptionProperties']);
                 Route::post('tenants/{tenant}/billing-profile/preview', [TenantController::class, 'previewBillingProfileChange']);
