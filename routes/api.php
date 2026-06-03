@@ -11,6 +11,9 @@ use App\Http\Controllers\Api\App\V1\CustomerController;
 use App\Http\Controllers\Api\App\V1\ContractReportController;
 use App\Http\Controllers\Api\App\V1\DashboardReportController;
 use App\Http\Controllers\Api\App\V1\LocationController;
+use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceExpenseController;
+use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceJobController;
+use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceReportController;
 use App\Http\Controllers\Api\App\V1\PropertyController;
 use App\Http\Controllers\Api\App\V1\PropertyFloorController;
 use App\Http\Controllers\Api\App\V1\PropertyTypeController;
@@ -88,6 +91,11 @@ Route::prefix('v1')->group(function () {
                     Route::get('by-property', [ContractReportController::class, 'byProperty']);
                     Route::get('expiring', [ContractReportController::class, 'expiring']);
                 });
+                Route::prefix('reports/maintenance')->group(function () {
+                    Route::get('summary', [MaintenanceReportController::class, 'summary']);
+                    Route::get('by-property', [MaintenanceReportController::class, 'byProperty']);
+                    Route::get('recent-expenses', [MaintenanceReportController::class, 'recentExpenses']);
+                });
                 Route::get('workspace/subscription', [WorkspaceController::class, 'subscription']);
                 Route::post('workspace/subscription/billing-profile/preview', [WorkspaceController::class, 'previewBillingProfileChange']);
                 Route::get('workspace/subscription/properties', [WorkspaceController::class, 'subscriptionProperties']);
@@ -111,6 +119,12 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('properties', PropertyController::class);
                 Route::apiResource('property-floors', PropertyFloorController::class);
                 Route::apiResource('units', UnitController::class);
+                Route::prefix('maintenance')->group(function () {
+                    Route::apiResource('jobs', MaintenanceJobController::class)
+                        ->parameters(['jobs' => 'maintenanceJob']);
+                    Route::apiResource('expenses', MaintenanceExpenseController::class)
+                        ->parameters(['expenses' => 'maintenanceExpense']);
+                });
                 Route::apiResource('customers', CustomerController::class);
                 Route::apiResource('customer-contracts', CustomerContractController::class);
                 Route::apiResource('staff-property-assignments', StaffPropertyAssignmentController::class);

@@ -8,6 +8,8 @@ use App\Models\Tenant\Country;
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
 use App\Models\Tenant\District;
+use App\Models\Tenant\MaintenanceExpense;
+use App\Models\Tenant\MaintenanceJob;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\PropertyType;
@@ -19,6 +21,8 @@ use App\Models\Tenant\Ward;
 use App\Policies\LocationPolicy;
 use App\Policies\CustomerContractPolicy;
 use App\Policies\CustomerPolicy;
+use App\Policies\MaintenanceExpensePolicy;
+use App\Policies\MaintenanceJobPolicy;
 use App\Policies\PropertyPolicy;
 use App\Policies\PropertyFloorPolicy;
 use App\Policies\PropertyTypePolicy;
@@ -61,6 +65,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Unit::class, UnitPolicy::class);
         Gate::policy(Customer::class, CustomerPolicy::class);
         Gate::policy(CustomerContract::class, CustomerContractPolicy::class);
+        Gate::policy(MaintenanceJob::class, MaintenanceJobPolicy::class);
+        Gate::policy(MaintenanceExpense::class, MaintenanceExpensePolicy::class);
         Gate::policy(StaffPropertyAssignment::class, StaffPropertyAssignmentPolicy::class);
         Gate::policy(TenantUser::class, TenantUserPolicy::class);
 

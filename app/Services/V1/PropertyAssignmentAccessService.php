@@ -4,6 +4,8 @@ namespace App\Services\V1;
 
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
+use App\Models\Tenant\MaintenanceExpense;
+use App\Models\Tenant\MaintenanceJob;
 use App\Models\Tenant\Permission;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
@@ -78,28 +80,22 @@ class PropertyAssignmentAccessService
 
     public function scopeProperties(Builder $query, User $user, string $column = 'properties.id'): Builder
     {
-        if ($this->canBypassPropertyScope($user)) {
-            return $query;
-        }
-
-        $ids = $this->assignedPropertyIds($user);
-
-        return $ids === []
-            ? $query->whereRaw('1 = 0')
-            : $query->whereIn($column, $ids);
+        return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
 
     public function scopePropertyFloors(Builder $query, User $user, string $column = 'property_id'): Builder
     {
-        if ($this->canBypassPropertyScope($user)) {
-            return $query;
-        }
+        return $this->scopeByAssignedPropertyIds($query, $user, $column);
+    }
 
-        $ids = $this->assignedPropertyIds($user);
+    public function scopeMaintenanceJobs(Builder $query, User $user, string $column = 'property_id'): Builder
+    {
+        return $this->scopeByAssignedPropertyIds($query, $user, $column);
+    }
 
-        return $ids === []
-            ? $query->whereRaw('1 = 0')
-            : $query->whereIn($column, $ids);
+    public function scopeMaintenanceExpenses(Builder $query, User $user, string $column = 'maintenance_jobs.property_id'): Builder
+    {
+        return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
 
     public function scopeUnits(Builder $query, User $user): Builder
@@ -220,5 +216,34 @@ class PropertyAssignmentAccessService
         return $customer->contracts()
             ->whereHas('unit.propertyFloor', fn (Builder $innerQuery) => $innerQuery->whereIn('property_id', $ids))
             ->exists();
+    }
+
+    public function canAccessMaintenanceJobModel(User $user, MaintenanceJob $maintenanceJob): bool
+    {
+        return $this->userCanAccessProperty($user, (int) $maintenanceJob->property_id);
+    }
+
+    public function canAccessMaintenanceExpenseModel(User $user, MaintenanceExpense $maintenanceExpense): bool
+    {
+        $propertyId = $maintenanceExpense->relationLoaded('maintenanceJob')
+            ? $maintenanceExpense->maintenanceJob?->property_id
+            : MaintenanceJob::query()
+                ->whereKey($maintenanceExpense->maintenance_job_id)
+                ->value('property_id');
+
+        return $propertyId !== null && $this->userCanAccessProperty($user, (int) $propertyId);
+    }
+
+    private function scopeByAssignedPropertyIds(Builder $query, User $user, string $column): Builder
+    {
+        if ($this->canBypassPropertyScope($user)) {
+            return $query;
+        }
+
+        $ids = $this->assignedPropertyIds($user);
+
+        return $ids === []
+            ? $query->whereRaw('1 = 0')
+            : $query->whereIn($column, $ids);
     }
 }
