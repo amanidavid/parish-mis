@@ -12,11 +12,16 @@ use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\PropertySubscriptionAccessService;
+use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
+use App\Services\V1\Billing\WorkspacePropertyRegistryService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class UnitController extends Controller
 {
@@ -24,6 +29,9 @@ class UnitController extends Controller
 
     public function __construct(
         private SubscriptionService $subscriptionService,
+        private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
+        private PropertySubscriptionAccessService $propertySubscriptionAccessService,
+        private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     )
     {
@@ -89,7 +97,7 @@ class UnitController extends Controller
     public function store(StoreUnitRequest $request)
     {
         $this->authorize('create', Unit::class);
-        $this->assertWorkspaceAllowsInventoryMutation();
+        $this->prepareInventoryMutation(true);
 
         $data = $request->validated();
         $propertyFloor = $this->resolveModelByUuid(PropertyFloor::class, $data['property_floor_uuid']);
@@ -101,6 +109,11 @@ class UnitController extends Controller
         if ($tenantUser instanceof TenantUser
             && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $propertyFloor->property_id)) {
             return ApiResponse::forbidden(['property_floor' => ['You do not have access to the selected property floor.']]);
+        }
+
+        $property = $propertyFloor->loadMissing('property')->property;
+        if ($error = $this->assertPropertyAllowsOperationalMutation($property, 'units')) {
+            return $error;
         }
 
         $exists = Unit::query()
@@ -118,7 +131,7 @@ class UnitController extends Controller
             'status' => $data['status'] ?? 'vacant',
         ]));
 
-        $this->syncWorkspaceUsage();
+        $this->syncWorkspaceUsage([(int) $property->id]);
 
         return ApiResponse::resource(new UnitResource($unit->load('propertyFloor.property')), ApiMessages::created('unit'), 201);
     }
@@ -133,9 +146,10 @@ class UnitController extends Controller
     public function update(UpdateUnitRequest $request, Unit $unit)
     {
         $this->authorize('update', $unit);
-        $this->assertWorkspaceAllowsInventoryMutation();
+        $this->prepareInventoryMutation();
 
         $data = $request->validated();
+        $originalPropertyId = (int) $unit->propertyFloor->property_id;
         $propertyFloor = $unit->propertyFloor;
 
         if (!empty($data['property_floor_uuid'] ?? null)) {
@@ -149,6 +163,15 @@ class UnitController extends Controller
         if ($tenantUser instanceof TenantUser
             && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $propertyFloor->property_id)) {
             return ApiResponse::forbidden(['property_floor' => ['You do not have access to the selected property floor.']]);
+        }
+
+        $property = $propertyFloor->loadMissing('property')->property;
+        if ($error = $this->assertPropertyAllowsOperationalMutation($property, 'units')) {
+            return $error;
+        }
+
+        if ($originalPropertyId !== (int) $propertyFloor->property_id) {
+            $this->captureUsageBaseline();
         }
 
         $unitNumber = isset($data['unit_number']) ? trim($data['unit_number']) : $unit->unit_number;
@@ -170,36 +193,80 @@ class UnitController extends Controller
             ])->save();
         });
 
+        if ($originalPropertyId !== (int) $propertyFloor->property_id) {
+            $this->syncWorkspaceUsage([$originalPropertyId, (int) $propertyFloor->property_id]);
+        }
+
         return ApiResponse::resource(new UnitResource($unit->fresh()->load('propertyFloor.property')), ApiMessages::updated('unit'));
     }
 
     public function destroy(Unit $unit)
     {
         $this->authorize('delete', $unit);
-        $this->assertWorkspaceAllowsInventoryMutation();
+        $this->prepareInventoryMutation(true);
+        $property = $unit->loadMissing('propertyFloor.property')->propertyFloor->property;
+
+        if ($error = $this->assertPropertyAllowsOperationalMutation($property, 'units')) {
+            return $error;
+        }
 
         DB::transaction(fn () => $unit->delete());
 
-        $this->syncWorkspaceUsage();
+        $this->syncWorkspaceUsage([(int) $property->id]);
 
         return ApiResponse::success(ApiMessages::deleted('unit'));
     }
 
-    private function syncWorkspaceUsage(): void
+    private function syncWorkspaceUsage(array $propertyIds = []): void
     {
         $tenant = request()->attributes->get('tenant');
 
-        if ($tenant instanceof \App\Models\Tenancy\Tenant) {
+        if ($tenant instanceof Tenant) {
             $this->subscriptionService->syncWorkspaceUsage($tenant);
+            $this->subscriptionUsageAdjustmentService->syncPendingAdjustment($tenant);
+            if ($propertyIds !== []) {
+                $this->workspacePropertyRegistryService->syncPropertyIds($tenant, $propertyIds);
+            }
         }
     }
 
-    private function assertWorkspaceAllowsInventoryMutation(): void
+    private function prepareInventoryMutation(bool $captureUsageBaseline = false): void
     {
         $tenant = request()->attributes->get('tenant');
 
-        if ($tenant instanceof \App\Models\Tenancy\Tenant) {
+        if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
+            if ($captureUsageBaseline) {
+                $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
+            }
         }
+    }
+
+    private function captureUsageBaseline(): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
+        }
+    }
+
+    private function assertPropertyAllowsOperationalMutation(Property $property, string $moduleName): ?\Illuminate\Http\JsonResponse
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            try {
+                $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, $moduleName);
+            } catch (InvalidArgumentException $exception) {
+                return ApiResponse::error(
+                    'Property subscription access is required.',
+                    ['property_subscription' => [$exception->getMessage()]],
+                    422
+                );
+            }
+        }
+
+        return null;
     }
 }

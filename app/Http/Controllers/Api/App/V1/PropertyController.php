@@ -14,7 +14,10 @@ use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyType;
 use App\Models\Tenant\Region;
 use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenancy\Tenant;
 use App\Models\Tenant\Ward;
+use App\Services\V1\Billing\WorkspacePropertyRegistryService;
+use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiResponse;
@@ -27,6 +30,8 @@ class PropertyController extends Controller
 
     public function __construct(
         private SubscriptionService $subscriptionService,
+        private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
+        private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     )
     {
@@ -112,7 +117,7 @@ class PropertyController extends Controller
     public function store(StorePropertyRequest $request)
     {
         $this->authorize('create', Property::class);
-        $this->assertWorkspaceAllowsInventoryMutation();
+        $this->prepareInventoryMutation(true);
 
         $data = $request->validated();
         $type = null;
@@ -147,6 +152,7 @@ class PropertyController extends Controller
         ]));
 
         $this->syncWorkspaceUsage();
+        $this->syncWorkspacePropertyRegistry([(int) $property->id]);
 
         return ApiResponse::resource(new PropertyResource($property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])), 'Property created', 201);
     }
@@ -164,7 +170,7 @@ class PropertyController extends Controller
     public function update(UpdatePropertyRequest $request, Property $property)
     {
         $this->authorize('update', $property);
-        $this->assertWorkspaceAllowsInventoryMutation();
+        $this->prepareInventoryMutation();
 
         $data = $request->validated();
         $typeId = $property->type_id;
@@ -238,6 +244,8 @@ class PropertyController extends Controller
             ])->save();
         });
 
+        $this->syncWorkspacePropertyRegistry([(int) $property->id]);
+
         return ApiResponse::resource(
             new PropertyResource($property->fresh()->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])),
             'Property updated'
@@ -247,11 +255,13 @@ class PropertyController extends Controller
     public function destroy(Property $property)
     {
         $this->authorize('delete', $property);
-        $this->assertWorkspaceAllowsInventoryMutation();
+        $this->prepareInventoryMutation(true);
+        $this->syncWorkspacePropertyRegistry([(int) $property->id]);
 
         DB::transaction(fn () => $property->delete());
 
         $this->syncWorkspaceUsage();
+        $this->markWorkspacePropertyDeleted($property->uuid);
 
         return ApiResponse::success('Property deleted');
     }
@@ -260,17 +270,39 @@ class PropertyController extends Controller
     {
         $tenant = request()->attributes->get('tenant');
 
-        if ($tenant instanceof \App\Models\Tenancy\Tenant) {
+        if ($tenant instanceof Tenant) {
             $this->subscriptionService->syncWorkspaceUsage($tenant);
+            $this->subscriptionUsageAdjustmentService->syncPendingAdjustment($tenant);
         }
     }
 
-    private function assertWorkspaceAllowsInventoryMutation(): void
+    private function prepareInventoryMutation(bool $captureUsageBaseline = false): void
     {
         $tenant = request()->attributes->get('tenant');
 
-        if ($tenant instanceof \App\Models\Tenancy\Tenant) {
+        if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
+            if ($captureUsageBaseline) {
+                $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
+            }
+        }
+    }
+
+    private function syncWorkspacePropertyRegistry(array $propertyIds): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            $this->workspacePropertyRegistryService->syncPropertyIds($tenant, $propertyIds);
+        }
+    }
+
+    private function markWorkspacePropertyDeleted(string $propertyUuid): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            $this->workspacePropertyRegistryService->markPropertyDeleted($tenant, $propertyUuid);
         }
     }
 

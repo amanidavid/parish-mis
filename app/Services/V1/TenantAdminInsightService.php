@@ -309,6 +309,7 @@ class TenantAdminInsightService
                 'properties.uuid as property_uuid',
                 'properties.name',
                 'properties.status',
+                'properties.created_at',
                 'countries.uuid as country_uuid',
                 'countries.name as country_name',
                 'regions.uuid as region_uuid',

@@ -6,6 +6,8 @@ use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\Subscription;
 use App\Models\Landlord\SubscriptionProfileChange;
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\BillingProrationService;
+use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -27,6 +29,8 @@ class SubscriptionBillingProfileChangeService
 
     public function __construct(
         private SubscriptionService $subscriptionService,
+        private BillingProrationService $billingProrationService,
+        private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
     )
     {
     }
@@ -130,6 +134,7 @@ class SubscriptionBillingProfileChangeService
 
             if ($timing === self::TIMING_IMMEDIATE_PRORATED) {
                 $this->applyProfileToWorkspace($tenant, $subscription, $newProfile);
+                $this->subscriptionUsageAdjustmentService->resetCurrentCycleBaselineToCurrentUsage($tenant->fresh());
             }
 
             return $subscription->fresh(['plan', 'billingProfile']);
@@ -166,6 +171,7 @@ class SubscriptionBillingProfileChangeService
             }
 
             $this->applyProfileToWorkspace($tenant, $subscription, $change->newBillingProfile);
+            $this->subscriptionUsageAdjustmentService->resetCurrentCycleBaselineToCurrentUsage($tenant->fresh());
 
             $change->status = self::STATUS_APPLIED;
             $change->applied_at = now();
@@ -222,43 +228,15 @@ class SubscriptionBillingProfileChangeService
         int $currentAmount,
         int $newAmount,
     ): array {
-        $periodStartsAt = $state['period_starts_at'];
-        $periodEndsAt = $state['period_ends_at'];
-        $applies = $subscription->status === 'active'
-            && $timing === self::TIMING_IMMEDIATE_PRORATED
-            && $state['is_current_period_active']
-            && $periodStartsAt instanceof CarbonInterface
-            && $periodEndsAt instanceof CarbonInterface;
-
-        if (!$applies) {
-            return [
-                'applies' => false,
-                'total_cycle_days' => 0,
-                'remaining_cycle_days' => 0,
-                'prorated_adjustment_cents' => 0,
-                'adjustment_type' => 'none',
-            ];
-        }
-
-        $periodStart = Carbon::parse($periodStartsAt)->startOfDay();
-        $periodEnd = Carbon::parse($periodEndsAt)->endOfDay();
-        $anchor = $effectiveAt->copy()->lt($periodStart) ? $periodStart : $effectiveAt->copy();
-
-        if ($anchor->gt($periodEnd)) {
-            throw new InvalidArgumentException('Immediate proration must be applied within the current billing cycle.');
-        }
-
-        $totalCycleDays = $periodStart->diffInDays($periodEnd->copy()->startOfDay()) + 1;
-        $remainingCycleDays = $anchor->copy()->startOfDay()->diffInDays($periodEnd->copy()->startOfDay()) + 1;
-        $adjustment = (int) round((($newAmount - $currentAmount) * $remainingCycleDays) / max($totalCycleDays, 1));
-
-        return [
-            'applies' => true,
-            'total_cycle_days' => $totalCycleDays,
-            'remaining_cycle_days' => $remainingCycleDays,
-            'prorated_adjustment_cents' => $adjustment,
-            'adjustment_type' => $adjustment > 0 ? 'charge' : ($adjustment < 0 ? 'credit' : 'none'),
-        ];
+        return $this->billingProrationService->calculateCurrentCycleAdjustment(
+            $state['period_starts_at'] ?? null,
+            $state['period_ends_at'] ?? null,
+            (bool) ($state['is_current_period_active'] ?? false),
+            $subscription->status === 'active' && $timing === self::TIMING_IMMEDIATE_PRORATED,
+            $effectiveAt,
+            $currentAmount,
+            $newAmount,
+        );
     }
 
     /** Enforce the supported change timing options before any billing workflow runs. */

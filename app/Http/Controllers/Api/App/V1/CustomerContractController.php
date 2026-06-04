@@ -13,11 +13,15 @@ use App\Models\Tenant\CustomerContract;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\PropertySubscriptionAccessService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
+use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class CustomerContractController extends Controller
 {
@@ -26,6 +30,8 @@ class CustomerContractController extends Controller
     public function __construct(
         private CustomerContractRuleService $ruleService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+        private PropertySubscriptionAccessService $propertySubscriptionAccessService,
+        private SubscriptionService $subscriptionService,
     )
     {
     }
@@ -95,6 +101,7 @@ class CustomerContractController extends Controller
     public function store(StoreCustomerContractRequest $request)
     {
         $this->authorize('create', CustomerContract::class);
+        $this->assertWorkspaceAllowsInventoryMutation();
 
         $data = $request->validated();
         [$customer, $unitId, $error] = $this->resolveCustomerAndUnit($data);
@@ -115,6 +122,15 @@ class CustomerContractController extends Controller
                     ->value('property_floors.property_id')
             )) {
             return ApiResponse::forbidden(['unit' => ['You do not have access to the selected unit property.']]);
+        }
+
+        $unit = Unit::query()->with('propertyFloor.property')->find($unitId);
+        if (!$unit || !$unit->propertyFloor || !$unit->propertyFloor->property) {
+            return ApiResponse::error('Unit property not found', ['unit_uuid' => ['The selected unit is not attached to a valid property.']], 422);
+        }
+
+        if ($error = $this->assertPropertyAllowsContractOperations($unit->propertyFloor->property, $data['start_date'])) {
+            return $error;
         }
 
         $exists = CustomerContract::query()->where('contract_number', trim($data['contract_number']))->exists();
@@ -165,6 +181,7 @@ class CustomerContractController extends Controller
     public function update(UpdateCustomerContractRequest $request, CustomerContract $customerContract)
     {
         $this->authorize('update', $customerContract);
+        $this->assertWorkspaceAllowsInventoryMutation();
 
         $data = $request->validated();
         $customer = $customerContract->customer;
@@ -192,6 +209,11 @@ class CustomerContractController extends Controller
             return ApiResponse::forbidden(['unit' => ['You do not have access to the selected unit property.']]);
         }
 
+        $unit = Unit::query()->with('propertyFloor.property')->find($unitId);
+        if (!$unit || !$unit->propertyFloor || !$unit->propertyFloor->property) {
+            return ApiResponse::error('Unit property not found', ['unit_uuid' => ['The selected unit is not attached to a valid property.']], 422);
+        }
+
         if (isset($data['contract_number'])) {
             $exists = CustomerContract::query()
                 ->where('contract_number', trim($data['contract_number']))
@@ -207,6 +229,10 @@ class CustomerContractController extends Controller
         $endDate = array_key_exists('end_date', $data)
             ? $data['end_date']
             : $customerContract->end_date?->toDateString();
+
+        if ($error = $this->assertPropertyAllowsContractOperations($unit->propertyFloor->property, $startDate)) {
+            return $error;
+        }
 
         if ($this->ruleService->hasOverlappingUnitContract($unitId, $startDate, $endDate, $customerContract->id)) {
             return ApiResponse::error('Contract period conflict', ['unit_uuid' => ['This unit already has an overlapping contract period']], 422);
@@ -244,6 +270,16 @@ class CustomerContractController extends Controller
     public function destroy(CustomerContract $customerContract)
     {
         $this->authorize('delete', $customerContract);
+        $this->assertWorkspaceAllowsInventoryMutation();
+        $property = $customerContract->loadMissing('unit.propertyFloor.property')->unit?->propertyFloor?->property;
+
+        if (!$property) {
+            return ApiResponse::error('Contract property not found', ['customer_contract' => ['The selected contract is not attached to a valid property.']], 422);
+        }
+
+        if ($error = $this->assertPropertyAllowsContractOperations($property)) {
+            return $error;
+        }
 
         DB::transaction(function () use ($customerContract) {
             $unitId = $customerContract->unit_id;
@@ -278,5 +314,36 @@ class CustomerContractController extends Controller
         }
 
         return [$customer, $unitId, null];
+    }
+
+    private function assertWorkspaceAllowsInventoryMutation(): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
+        }
+    }
+
+    private function assertPropertyAllowsContractOperations(Property $property, ?string $startDate = null): ?\Illuminate\Http\JsonResponse
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            try {
+                $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, 'contracts');
+                if ($startDate !== null) {
+                    $this->propertySubscriptionAccessService->assertContractStartDateCovered($tenant, $property, $startDate);
+                }
+            } catch (InvalidArgumentException $exception) {
+                return ApiResponse::error(
+                    'Property subscription coverage is required.',
+                    ['property_subscription' => [$exception->getMessage()]],
+                    422
+                );
+            }
+        }
+
+        return null;
     }
 }

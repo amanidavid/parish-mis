@@ -1,6 +1,11 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\V1\AuthController as AdminAuthController;
+use App\Http\Controllers\Api\Admin\V1\Billing\AutomationTaskController;
+use App\Http\Controllers\Api\Admin\V1\Billing\PropertySubscriptionReportController;
+use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionController;
+use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionPaymentController;
+use App\Http\Controllers\Api\Admin\V1\Billing\TenantSubscriptionUsageAdjustmentController;
 use App\Http\Controllers\Api\Admin\V1\BillingProfileController;
 use App\Http\Controllers\Api\Admin\V1\DashboardController as AdminDashboardController;
 use App\Http\Controllers\Api\Admin\V1\TenantController;
@@ -35,6 +40,7 @@ Route::prefix('v1')->group(function () {
 
             Route::middleware('admin.jwt.auth')->group(function () {
                 Route::get('platform/overview', [AdminDashboardController::class, 'overview']);
+                Route::get('billing-rules', [BillingProfileController::class, 'indexRules']);
                 Route::get('billing-profiles', [BillingProfileController::class, 'index']);
                 Route::post('billing-profiles', [BillingProfileController::class, 'store']);
                 Route::get('billing-profiles/{billingProfile}', [BillingProfileController::class, 'show']);
@@ -55,11 +61,28 @@ Route::prefix('v1')->group(function () {
                 Route::get('tenants/{tenant}/contracts/summary', [TenantController::class, 'contractsSummary']);
                 Route::get('tenants/{tenant}/subscription', [TenantController::class, 'subscription']);
                 Route::get('tenants/{tenant}/subscription/properties', [TenantController::class, 'subscriptionProperties']);
+                Route::get('tenants/{tenant}/property-subscriptions', [TenantPropertySubscriptionController::class, 'index']);
+                Route::get('tenants/{tenant}/property-subscriptions/{propertyUuid}', [TenantPropertySubscriptionController::class, 'show']);
+                Route::get('tenants/{tenant}/property-subscriptions/{propertyUuid}/payments', [TenantPropertySubscriptionController::class, 'payments']);
+                Route::get('tenants/{tenant}/property-subscription-payments', [TenantPropertySubscriptionPaymentController::class, 'index']);
+                Route::post('tenants/{tenant}/property-subscription-payments/preview', [TenantPropertySubscriptionPaymentController::class, 'preview']);
+                Route::post('tenants/{tenant}/property-subscription-payments', [TenantPropertySubscriptionPaymentController::class, 'store']);
+                Route::get('tenants/{tenant}/usage-adjustments/preview', [TenantSubscriptionUsageAdjustmentController::class, 'preview']);
+                Route::get('tenants/{tenant}/usage-adjustments', [TenantSubscriptionUsageAdjustmentController::class, 'index']);
+                Route::post('tenants/{tenant}/usage-adjustments/{usageAdjustment}/apply', [TenantSubscriptionUsageAdjustmentController::class, 'apply']);
+                Route::post('tenants/{tenant}/usage-adjustments/{usageAdjustment}/waive', [TenantSubscriptionUsageAdjustmentController::class, 'waive']);
                 Route::post('tenants/{tenant}/billing-profile/preview', [TenantController::class, 'previewBillingProfileChange']);
                 Route::patch('tenants/{tenant}/billing-profile', [TenantController::class, 'assignBillingProfile']);
                 Route::patch('tenants/{tenant}/status', [TenantController::class, 'updateStatus']);
                 Route::patch('tenants/{tenant}/subscription-status', [TenantController::class, 'updateSubscriptionStatus']);
                 Route::post('tenants/{tenant}/retry-provisioning', [TenantController::class, 'retryProvisioning']);
+                Route::get('reports/property-subscription-payments/summary', [PropertySubscriptionReportController::class, 'paymentSummary']);
+                Route::get('reports/property-subscriptions/by-workspace', [PropertySubscriptionReportController::class, 'byWorkspace']);
+                Route::get('reports/property-subscriptions/expired', [PropertySubscriptionReportController::class, 'expired']);
+                Route::get('automation/tasks', [AutomationTaskController::class, 'index']);
+                Route::get('automation/tasks/{automationTaskSetting}/runs', [AutomationTaskController::class, 'runs']);
+                Route::patch('automation/tasks/{automationTaskSetting}', [AutomationTaskController::class, 'update']);
+                Route::post('automation/tasks/{automationTaskSetting}/run-now', [AutomationTaskController::class, 'runNow']);
             });
         });
 

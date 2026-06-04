@@ -16,6 +16,7 @@ class TenantIndexRequest extends FormRequest
         return [
             'search' => ['nullable', 'string', 'max:120'],
             'name' => ['nullable', 'string', 'max:120'],
+            'display_name' => ['nullable', 'string', 'max:120'],
             'status' => ['nullable', 'in:active,suspended'],
             'provisioning_status' => ['nullable', 'in:pending,provisioning,ready,failed'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

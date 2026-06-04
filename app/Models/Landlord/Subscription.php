@@ -33,4 +33,14 @@ class Subscription extends BaseModel
     {
         return $this->hasMany(SubscriptionProfileChange::class, 'subscription_id');
     }
+
+    public function usageBaselines(): HasMany
+    {
+        return $this->hasMany(SubscriptionUsageBaseline::class, 'subscription_id');
+    }
+
+    public function usageAdjustments(): HasMany
+    {
+        return $this->hasMany(SubscriptionUsageAdjustment::class, 'subscription_id');
+    }
 }

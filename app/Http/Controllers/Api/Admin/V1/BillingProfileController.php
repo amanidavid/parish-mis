@@ -15,6 +15,7 @@ use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\BillingRule;
 use App\Services\V1\BillingProfileService;
 use App\Support\ApiResponse;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -140,25 +141,24 @@ class BillingProfileController extends Controller
         );
     }
 
+    /** List billing rules across profiles for admin dropdowns and rule-selection workflows. */
+    public function indexRules(BillingRuleIndexRequest $request)
+    {
+        $filters = $request->validated();
+        $rules = $this->newBillingRuleQuery($filters)
+            ->paginate((int) ($filters['per_page'] ?? 15))
+            ->withQueryString();
+
+        return ApiResponse::resource(BillingRuleResource::collection($rules), 'Billing rules retrieved successfully.');
+    }
+
     /** List the paginated pricing rules that belong to one billing profile. */
     public function rules(BillingRuleIndexRequest $request, BillingProfile $billingProfile)
     {
         $filters = $request->validated();
-        $query = $billingProfile->rules()->getQuery();
-
-        if (!empty($filters['status'] ?? null)) {
-            $query->where('status', $filters['status']);
-        }
-
-        if (!empty($filters['effective_on'] ?? null)) {
-            $query->where('effective_from', '<=', $filters['effective_on'])
-                ->where(function ($innerQuery) use ($filters) {
-                    $innerQuery->whereNull('effective_to')
-                        ->orWhere('effective_to', '>=', $filters['effective_on']);
-                });
-        }
-
-        $rules = $query->orderBy('sort_order')->orderBy('range_start')->paginate((int) ($filters['per_page'] ?? 15));
+        $rules = $this->newBillingRuleQuery($filters, $billingProfile)
+            ->paginate((int) ($filters['per_page'] ?? 15))
+            ->withQueryString();
 
         return ApiResponse::resource(BillingRuleResource::collection($rules), 'Billing rules retrieved successfully.');
     }
@@ -224,5 +224,82 @@ class BillingProfileController extends Controller
         ])->save();
 
         return ApiResponse::resource(new BillingRuleResource($billingRule->fresh()), 'Billing rule updated successfully.');
+    }
+
+    private function newBillingRuleQuery(array $filters, ?BillingProfile $billingProfile = null): EloquentBuilder
+    {
+        $query = BillingRule::query()
+            ->select([
+                'id',
+                'uuid',
+                'billing_profile_id',
+                'range_start',
+                'range_end',
+                'price_cents',
+                'currency',
+                'effective_from',
+                'effective_to',
+                'sort_order',
+                'status',
+                'created_at',
+                'updated_at',
+            ])
+            ->with('profile:id,uuid,name,billing_interval,currency,status');
+
+        if ($billingProfile) {
+            $query->where('billing_profile_id', $billingProfile->id);
+        } elseif (!empty($filters['billing_profile_uuid'] ?? null)) {
+            $billingProfileUuid = (string) $filters['billing_profile_uuid'];
+            $query->whereHas('profile', static function (EloquentBuilder $builder) use ($billingProfileUuid) {
+                $builder->where('uuid', $billingProfileUuid);
+            });
+        }
+
+        $this->applyBillingRuleFilters($query, $filters);
+        $this->applyBillingRuleSort($query, $filters['sort'] ?? null);
+
+        return $query;
+    }
+
+    private function applyBillingRuleFilters(EloquentBuilder $query, array $filters): void
+    {
+        if (!empty($filters['status'] ?? null)) {
+            $query->where('status', $filters['status']);
+        }
+
+        if (!empty($filters['effective_on'] ?? null)) {
+            $query->whereDate('effective_from', '<=', $filters['effective_on'])
+                ->where(function (EloquentBuilder $innerQuery) use ($filters) {
+                    $innerQuery->whereNull('effective_to')
+                        ->orWhereDate('effective_to', '>=', $filters['effective_on']);
+                })
+                ->whereHas('profile', static function (EloquentBuilder $builder) {
+                    $builder->where('status', 'active');
+                });
+        }
+
+        if (array_key_exists('registered_units', $filters) && $filters['registered_units'] !== null) {
+            $registeredUnits = (int) $filters['registered_units'];
+            $query->where('range_start', '<=', $registeredUnits)
+                ->where(function (EloquentBuilder $innerQuery) use ($registeredUnits) {
+                    $innerQuery->whereNull('range_end')
+                        ->orWhere('range_end', '>=', $registeredUnits);
+                });
+        }
+    }
+
+    private function applyBillingRuleSort(EloquentBuilder $query, ?string $sort): void
+    {
+        $sort = trim((string) $sort);
+        $direction = str_starts_with($sort, '-') ? 'desc' : 'asc';
+        $key = ltrim($sort, '-');
+
+        match ($key) {
+            'price_cents' => $query->orderBy('price_cents', $direction)->orderBy('sort_order')->orderBy('range_start'),
+            'effective_from' => $query->orderBy('effective_from', $direction)->orderBy('sort_order')->orderBy('range_start'),
+            'created_at' => $query->orderBy('created_at', $direction)->orderBy('sort_order')->orderBy('range_start'),
+            'sort_order' => $query->orderBy('sort_order', $direction)->orderBy('range_start'),
+            default => $query->orderBy('range_start', $direction)->orderBy('sort_order')->orderBy('created_at'),
+        };
     }
 }

@@ -14,12 +14,15 @@ use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\PropertySubscriptionAccessService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 class MaintenanceExpenseController extends Controller
 {
@@ -27,6 +30,7 @@ class MaintenanceExpenseController extends Controller
 
     public function __construct(
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+        private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private SubscriptionService $subscriptionService,
     ) {
     }
@@ -120,6 +124,15 @@ class MaintenanceExpenseController extends Controller
             return ApiResponse::forbidden(['maintenance_job' => ['You do not have access to the selected maintenance job.']]);
         }
 
+        $property = Property::query()->find($maintenanceJob->property_id);
+        if (!$property) {
+            return ApiResponse::error('Property not found', ['maintenance_job_uuid' => ['The selected maintenance job is not attached to a valid property.']], 422);
+        }
+
+        if ($error = $this->assertPropertyAllowsMaintenance($property)) {
+            return $error;
+        }
+
         $maintenanceExpense = DB::transaction(function () use ($data, $maintenanceJob, $tenantUser) {
             return MaintenanceExpense::query()->create([
                 'maintenance_job_id' => $maintenanceJob->id,
@@ -168,6 +181,15 @@ class MaintenanceExpenseController extends Controller
             return ApiResponse::forbidden(['maintenance_job' => ['You do not have access to the selected maintenance job.']]);
         }
 
+        $property = Property::query()->find($maintenanceJob->property_id);
+        if (!$property) {
+            return ApiResponse::error('Property not found', ['maintenance_job_uuid' => ['The selected maintenance job is not attached to a valid property.']], 422);
+        }
+
+        if ($error = $this->assertPropertyAllowsMaintenance($property)) {
+            return $error;
+        }
+
         DB::transaction(function () use ($maintenanceExpense, $maintenanceJob, $data) {
             $maintenanceExpense->fill([
                 'maintenance_job_id' => $maintenanceJob->id,
@@ -188,6 +210,11 @@ class MaintenanceExpenseController extends Controller
     {
         $this->authorize('delete', $maintenanceExpense);
         $this->assertWorkspaceAllowsInventoryMutation();
+        $property = $maintenanceExpense->loadMissing('maintenanceJob.property')->maintenanceJob?->property;
+
+        if ($property && ($error = $this->assertPropertyAllowsMaintenance($property))) {
+            return $error;
+        }
 
         DB::transaction(fn () => $maintenanceExpense->delete());
 
@@ -244,8 +271,27 @@ class MaintenanceExpenseController extends Controller
     {
         $tenant = request()->attributes->get('tenant');
 
-        if ($tenant instanceof \App\Models\Tenancy\Tenant) {
+        if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
         }
+    }
+
+    private function assertPropertyAllowsMaintenance(Property $property): ?\Illuminate\Http\JsonResponse
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            try {
+                $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, 'maintenance');
+            } catch (InvalidArgumentException $exception) {
+                return ApiResponse::error(
+                    'Property subscription access is required.',
+                    ['property_subscription' => [$exception->getMessage()]],
+                    422
+                );
+            }
+        }
+
+        return null;
     }
 }

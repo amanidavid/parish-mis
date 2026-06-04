@@ -156,7 +156,7 @@ class WorkspaceController extends Controller
             );
         }
 
-        return ApiResponse::resource($preview, 'Workspace billing profile change preview generated successfully.');
+        return ApiResponse::success('Workspace billing profile change preview generated successfully.', $preview);
     }
 
     /** Return paginated property-by-property billing estimates for the current workspace. */

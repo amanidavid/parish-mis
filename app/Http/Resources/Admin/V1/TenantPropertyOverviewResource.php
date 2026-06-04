@@ -37,6 +37,7 @@ class TenantPropertyOverviewResource extends ApiJsonResource
             'customers_count' => (int) $this->customers_count,
             'contracts_count' => (int) $this->contracts_count,
             'active_contracts_count' => (int) $this->active_contracts_count,
+            'created_at' => $this->formatTimestamp($this->created_at),
         ];
     }
 }

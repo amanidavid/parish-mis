@@ -6,6 +6,7 @@ use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\Plan;
 use App\Models\Landlord\Subscription;
 use App\Models\Landlord\SubscriptionProfileChange;
+use App\Models\Landlord\SubscriptionUsageAdjustment;
 use App\Models\Landlord\SubscriptionUsage;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
@@ -109,7 +110,7 @@ class SubscriptionService
     /** Refresh the current workspace usage counters that billing summaries and guards depend on. */
     public function syncWorkspaceUsage(Tenant $tenant): array
     {
-        $counts = $this->runInTenantContext($tenant, fn () => $this->calculateWorkspaceInventoryTotals());
+        $counts = $this->runInTenantContext($tenant, fn () => $this->calculateUsageSummary(null));
         $now = now();
 
         $this->updateUsageMetric($tenant->id, self::METRIC_PROPERTIES, $counts['total_properties'], $now, [
@@ -137,6 +138,13 @@ class SubscriptionService
                 ->orderByDesc('id')
                 ->first()
             : null;
+        $pendingUsageAdjustment = $subscription
+            ? SubscriptionUsageAdjustment::query()
+                ->where('subscription_id', $subscription->id)
+                ->where('status', SubscriptionUsageAdjustment::STATUS_PENDING)
+                ->orderByDesc('created_at')
+                ->first()
+            : null;
         $summaryUsage = $this->runInTenantContext($tenant, function () use ($billingProfile) {
             return $this->calculateUsageSummary($billingProfile);
         });
@@ -147,7 +155,12 @@ class SubscriptionService
 
         return [
             'workspace_uuid' => $tenant->uuid,
+            'name' => $tenant->name,
+            'display_name' => $tenant->display_name,
+            'database' => $tenant->database,
             'workspace_status' => $tenant->status,
+            'created_at' => $this->formatDateTime($tenant->created_at),
+            'updated_at' => $this->formatDateTime($tenant->updated_at),
             'access_state' => $accessState['state'],
             'access_message' => $accessState['message'],
             'inventory_changes_allowed' => $accessState['inventory_changes_allowed'],
@@ -205,6 +218,16 @@ class SubscriptionService
                         'billing_interval' => $pendingProfileChange->newBillingProfile->billing_interval,
                         'currency' => $pendingProfileChange->newBillingProfile->currency,
                     ] : null,
+                ] : null,
+                'pending_usage_adjustment' => $pendingUsageAdjustment ? [
+                    'uuid' => $pendingUsageAdjustment->uuid,
+                    'status' => $pendingUsageAdjustment->status,
+                    'adjustment_type' => $pendingUsageAdjustment->adjustment_type,
+                    'effective_at' => $this->formatDateTime($pendingUsageAdjustment->effective_at),
+                    'prorated_adjustment_cents' => (int) $pendingUsageAdjustment->prorated_adjustment_cents,
+                    'delta_price_cents' => (int) $pendingUsageAdjustment->delta_price_cents,
+                    'baseline_registered_units_total' => (int) $pendingUsageAdjustment->baseline_registered_units_total,
+                    'current_registered_units_total' => (int) $pendingUsageAdjustment->current_registered_units_total,
                 ] : null,
             ] : null,
             'usage' => [
@@ -417,6 +440,39 @@ class SubscriptionService
     public function getWorkspacePropertyUsageFrequencies(Tenant $tenant): Collection
     {
         return $this->runInTenantContext($tenant, fn () => $this->propertyRegisteredUnitFrequencies());
+    }
+
+    public function getWorkspacePropertyPricingSnapshot(
+        Tenant $tenant,
+        ?BillingProfile $billingProfile = null,
+        CarbonInterface|string|null $date = null
+    ): Collection {
+        return $this->runInTenantContext($tenant, function () use ($tenant, $billingProfile, $date) {
+            $activeProfile = $billingProfile
+                ?? $this->currentSubscription($tenant)?->billingProfile
+                ?? $this->resolveWorkspaceBillingProfile($tenant);
+            $rules = $activeProfile
+                ? $this->billingProfileService->activeRulesForDate($activeProfile, $date)
+                : collect();
+
+            return $this->propertyUsageQuery()
+                ->orderBy('properties.name')
+                ->get()
+                ->map(function (Property $property) use ($rules, $activeProfile) {
+                    $rule = $activeProfile
+                        ? $this->billingProfileService->matchingRuleFromCollection($rules, (int) $property->registered_units)
+                        : null;
+
+                    return [
+                        'property_uuid' => $property->uuid,
+                        'name' => $property->name,
+                        'status' => $property->status,
+                        'registered_units' => (int) $property->registered_units,
+                        'estimated_price_cents' => (int) ($rule?->price_cents ?? 0),
+                    ];
+                })
+                ->values();
+        });
     }
 
     /** Resolve the billing profile currently governing the workspace, falling back to the active default profile. */

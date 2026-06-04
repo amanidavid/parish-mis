@@ -32,6 +32,7 @@ use App\Services\V1\TenantAdminInsightService;
 use App\Services\V1\TenantProvisioningService;
 use App\Services\V1\WorkspaceService;
 use App\Support\ApiResponse;
+use Illuminate\Database\Eloquent\Builder;
 use InvalidArgumentException;
 
 class TenantController extends Controller
@@ -69,13 +70,13 @@ class TenantController extends Controller
             'updated_at',
         ]);
 
-        if (!empty($filters['search'] ?? null)) {
-            $query->where('name', 'like', $filters['search'].'%');
-        }
+        $this->applyWorkspaceSearch($query, $filters['search'] ?? null);
 
         if (!empty($filters['name'] ?? null)) {
             $query->where('name', 'like', $filters['name'].'%');
         }
+
+        $this->applyWorkspaceDisplayNamePrefixFilter($query, $filters['display_name'] ?? null);
 
         if (!empty($filters['status'] ?? null)) {
             $query->where('status', $filters['status']);
@@ -233,6 +234,8 @@ class TenantController extends Controller
                 'database' => $tenant->database,
                 'status' => $tenant->status,
                 'provisioning_status' => $tenant->provisioning_status,
+                'created_at' => $tenant->created_at?->toDateTimeString(),
+                'updated_at' => $tenant->updated_at?->toDateTimeString(),
                 'access_state' => $subscription['access_state'] ?? null,
                 'access_message' => $subscription['access_message'] ?? null,
                 'inventory_changes_allowed' => $subscription['inventory_changes_allowed'] ?? null,
@@ -404,7 +407,7 @@ class TenantController extends Controller
             );
         }
 
-        return ApiResponse::resource($preview, 'Workspace billing profile change preview generated successfully.');
+        return ApiResponse::success('Workspace billing profile change preview generated successfully.', $preview);
     }
 
     /** Apply a billing profile change immediately or schedule it for the next billing cycle. */
@@ -449,5 +452,56 @@ class TenantController extends Controller
                 'tenant' => ['Please review the submitted workspace details and try again.'],
             ],
         };
+    }
+
+    private function applyWorkspaceSearch(Builder $query, ?string $search): void
+    {
+        $search = trim((string) $search);
+
+        if ($search === '') {
+            return;
+        }
+
+        if (!$this->usesPostgresCaseSensitiveLike($query)) {
+            $query->where(function (Builder $searchQuery) use ($search) {
+                $searchQuery
+                    ->where('name', 'like', $search.'%')
+                    ->orWhere('display_name', 'like', $search.'%');
+            });
+
+            return;
+        }
+
+        $loweredSearch = mb_strtolower($search, 'UTF-8').'%';
+
+        $query->where(function (Builder $searchQuery) use ($search, $loweredSearch) {
+            $searchQuery
+                ->where('name', 'like', $search.'%')
+                ->orWhereRaw('LOWER(display_name) LIKE ?', [$loweredSearch]);
+        });
+    }
+
+    private function applyWorkspaceDisplayNamePrefixFilter(Builder $query, ?string $displayName): void
+    {
+        $displayName = trim((string) $displayName);
+
+        if ($displayName === '') {
+            return;
+        }
+
+        if (!$this->usesPostgresCaseSensitiveLike($query)) {
+            $query->where('display_name', 'like', $displayName.'%');
+
+            return;
+        }
+
+        $query->whereRaw('LOWER(display_name) LIKE ?', [
+            mb_strtolower($displayName, 'UTF-8').'%',
+        ]);
+    }
+
+    private function usesPostgresCaseSensitiveLike(Builder $query): bool
+    {
+        return $query->getModel()->getConnection()->getDriverName() === 'pgsql';
     }
 }

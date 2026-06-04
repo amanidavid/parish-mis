@@ -13,6 +13,8 @@ use App\Models\Tenant\Property;
 use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\PropertySubscriptionAccessService;
 use App\Services\V1\Maintenance\MaintenanceHierarchyService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
@@ -20,6 +22,7 @@ use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 class MaintenanceJobController extends Controller
 {
@@ -28,6 +31,7 @@ class MaintenanceJobController extends Controller
     public function __construct(
         private MaintenanceHierarchyService $maintenanceHierarchyService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+        private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private SubscriptionService $subscriptionService,
     ) {
     }
@@ -115,6 +119,10 @@ class MaintenanceJobController extends Controller
             }
         }
 
+        if ($error = $this->assertPropertyAllowsMaintenance($resolvedHierarchy['property'])) {
+            return $error;
+        }
+
         $maintenanceJob = DB::transaction(function () use ($data, $resolvedHierarchy, $tenantUser) {
             return MaintenanceJob::query()->create([
                 'property_id' => $resolvedHierarchy['property']->id,
@@ -163,6 +171,10 @@ class MaintenanceJobController extends Controller
             }
         }
 
+        if ($error = $this->assertPropertyAllowsMaintenance($resolvedHierarchy['property'])) {
+            return $error;
+        }
+
         DB::transaction(function () use ($maintenanceJob, $data, $resolvedHierarchy) {
             $maintenanceJob->fill([
                 'property_id' => $resolvedHierarchy['property']->id,
@@ -184,6 +196,11 @@ class MaintenanceJobController extends Controller
     {
         $this->authorize('delete', $maintenanceJob);
         $this->assertWorkspaceAllowsInventoryMutation();
+        $property = $maintenanceJob->loadMissing('property')->property;
+
+        if ($property && ($error = $this->assertPropertyAllowsMaintenance($property))) {
+            return $error;
+        }
 
         DB::transaction(fn () => $maintenanceJob->delete());
 
@@ -232,8 +249,27 @@ class MaintenanceJobController extends Controller
     {
         $tenant = request()->attributes->get('tenant');
 
-        if ($tenant instanceof \App\Models\Tenancy\Tenant) {
+        if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
         }
+    }
+
+    private function assertPropertyAllowsMaintenance(Property $property): ?\Illuminate\Http\JsonResponse
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            try {
+                $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, 'maintenance');
+            } catch (InvalidArgumentException $exception) {
+                return ApiResponse::error(
+                    'Property subscription access is required.',
+                    ['property_subscription' => [$exception->getMessage()]],
+                    422
+                );
+            }
+        }
+
+        return null;
     }
 }

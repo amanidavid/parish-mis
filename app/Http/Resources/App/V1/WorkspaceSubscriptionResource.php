@@ -11,7 +11,12 @@ class WorkspaceSubscriptionResource extends ApiJsonResource
     {
         return [
             'workspace_uuid' => $this['workspace_uuid'],
+            'name' => $this['name'] ?? null,
+            'display_name' => $this['display_name'] ?? null,
+            'database' => $this['database'] ?? null,
             'workspace_status' => $this['workspace_status'],
+            'created_at' => $this['created_at'] ?? null,
+            'updated_at' => $this['updated_at'] ?? null,
             'access_state' => $this['access_state'] ?? null,
             'access_message' => $this['access_message'] ?? null,
             'inventory_changes_allowed' => $this['inventory_changes_allowed'] ?? null,
