@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\V1\AuthController as AdminAuthController;
 use App\Http\Controllers\Api\Admin\V1\Billing\AutomationTaskController;
+use App\Http\Controllers\Api\Admin\V1\Billing\AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertySubscriptionReportController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionPaymentController;
@@ -40,6 +41,13 @@ Route::prefix('v1')->group(function () {
 
             Route::middleware('admin.jwt.auth')->group(function () {
                 Route::get('platform/overview', [AdminDashboardController::class, 'overview']);
+                Route::prefix('analytics')->group(function () {
+                    Route::get('revenue-trend', [AdminAnalyticsController::class, 'revenueTrend']);
+                    Route::get('subscription-status-trend', [AdminAnalyticsController::class, 'subscriptionStatusTrend']);
+                    Route::get('property-growth-trend', [AdminAnalyticsController::class, 'propertyGrowthTrend']);
+                    Route::get('subscription-status-split', [AdminAnalyticsController::class, 'subscriptionStatusSplit']);
+                    Route::get('top-billing-rules', [AdminAnalyticsController::class, 'topBillingRules']);
+                });
                 Route::get('billing-rules', [BillingProfileController::class, 'indexRules']);
                 Route::get('billing-profiles', [BillingProfileController::class, 'index']);
                 Route::post('billing-profiles', [BillingProfileController::class, 'store']);

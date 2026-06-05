@@ -12,11 +12,14 @@ use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
 class PropertySubscriptionService
 {
+    private const WORKSPACE_REPORT_TOTALS_CACHE_TTL_SECONDS = 60;
+
     public function __construct(
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
@@ -45,8 +48,7 @@ class PropertySubscriptionService
         }
 
         if (!empty($filters['search'] ?? null)) {
-            $search = strtolower(trim((string) $filters['search']));
-            $query->whereRaw('LOWER(workspace_properties.property_name) LIKE ?', [$search.'%']);
+            $this->applyPrefixSearch($query, 'workspace_properties.property_name', (string) $filters['search']);
         }
 
         if (!empty($filters['property_status'] ?? null)) {
@@ -237,16 +239,16 @@ class PropertySubscriptionService
         }
 
         if (!empty($filters['search'] ?? null)) {
-            $search = strtolower(trim((string) $filters['search']));
-            $query->whereHas('workspaceProperty', fn (EloquentBuilder $builder) => $builder->whereRaw('LOWER(property_name) LIKE ?', [$search.'%']));
+            $search = trim((string) $filters['search']);
+            $query->whereHas('workspaceProperty', fn (EloquentBuilder $builder) => $this->applyPrefixSearch($builder, 'property_name', $search));
         }
 
         if (!empty($filters['start_date'] ?? null)) {
-            $query->whereDate('payment_date', '>=', $filters['start_date']);
+            $query->where('payment_date', '>=', $filters['start_date']);
         }
 
         if (!empty($filters['end_date'] ?? null)) {
-            $query->whereDate('payment_date', '<=', $filters['end_date']);
+            $query->where('payment_date', '<=', $filters['end_date']);
         }
 
         $this->applyPaymentSort($query, $filters['sort'] ?? null);
@@ -261,16 +263,32 @@ class PropertySubscriptionService
         $query = PropertySubscriptionPayment::query();
 
         if (!empty($filters['start_date'] ?? null)) {
-            $query->whereDate('payment_date', '>=', $filters['start_date']);
+            $query->where('payment_date', '>=', $filters['start_date']);
         }
 
         if (!empty($filters['end_date'] ?? null)) {
-            $query->whereDate('payment_date', '<=', $filters['end_date']);
+            $query->where('payment_date', '<=', $filters['end_date']);
         }
 
         if (!empty($filters['tenant_uuid'] ?? null)) {
             $tenantUuid = (string) $filters['tenant_uuid'];
-            $query->whereHas('tenant', fn (EloquentBuilder $builder) => $builder->where('uuid', $tenantUuid));
+            $tenantId = Tenant::query()->where('uuid', $tenantUuid)->value('id');
+
+            if (!$tenantId) {
+                return [
+                    'filters' => [
+                        'tenant_uuid' => $filters['tenant_uuid'] ?? null,
+                        'start_date' => $filters['start_date'] ?? null,
+                        'end_date' => $filters['end_date'] ?? null,
+                    ],
+                    'totals' => [
+                        'payments_count' => 0,
+                        'total_collected_amount_cents' => 0,
+                    ],
+                ];
+            }
+
+            $query->where('tenant_id', $tenantId);
         }
 
         $totals = $query
@@ -299,11 +317,11 @@ class PropertySubscriptionService
             ->selectRaw('COALESCE(SUM(total_amount_cents), 0) as total_collected_amount_cents');
 
         if (!empty($filters['start_date'] ?? null)) {
-            $paymentSummary->whereDate('payment_date', '>=', $filters['start_date']);
+            $paymentSummary->where('payment_date', '>=', $filters['start_date']);
         }
 
         if (!empty($filters['end_date'] ?? null)) {
-            $paymentSummary->whereDate('payment_date', '<=', $filters['end_date']);
+            $paymentSummary->where('payment_date', '<=', $filters['end_date']);
         }
 
         $paymentSummary->groupBy('tenant_id');
@@ -339,11 +357,12 @@ class PropertySubscriptionService
             ->selectRaw('COALESCE(payment_summary.total_collected_amount_cents, 0) as total_collected_amount_cents');
 
         if (!empty($filters['search'] ?? null)) {
-            $search = strtolower(trim((string) $filters['search']));
+            $search = trim((string) $filters['search']);
             $query->where(function (EloquentBuilder $builder) use ($search) {
-                $builder
-                    ->whereRaw('LOWER(tenants.display_name) LIKE ?', [$search.'%'])
-                    ->orWhereRaw('LOWER(tenants.name) LIKE ?', [$search.'%']);
+                $this->applyPrefixSearch($builder, 'tenants.display_name', $search)
+                    ->orWhere(function (EloquentBuilder $innerBuilder) use ($search) {
+                        $this->applyPrefixSearch($innerBuilder, 'tenants.name', $search);
+                    });
             });
         }
 
@@ -354,26 +373,7 @@ class PropertySubscriptionService
         $this->applyWorkspaceReportSort($query, $filters['sort'] ?? null);
         $rows = $query->paginate((int) ($filters['per_page'] ?? 15))->withQueryString();
 
-        $totals = DB::connection('base')->table('tenants')
-            ->leftJoinSub($paymentSummary, 'payment_summary', 'payment_summary.tenant_id', '=', 'tenants.id')
-            ->leftJoinSub($propertySummary, 'property_summary', 'property_summary.tenant_id', '=', 'tenants.id')
-            ->when(!empty($filters['search'] ?? null), function ($builder) use ($filters) {
-                $search = strtolower(trim((string) $filters['search']));
-                $builder->where(function ($innerQuery) use ($search) {
-                    $innerQuery
-                        ->whereRaw('LOWER(tenants.display_name) LIKE ?', [$search.'%'])
-                        ->orWhereRaw('LOWER(tenants.name) LIKE ?', [$search.'%']);
-                });
-            })
-            ->when(!empty($filters['workspace_status'] ?? null), fn ($builder) => $builder->where('tenants.status', $filters['workspace_status']))
-            ->selectRaw('COUNT(tenants.id) as workspaces_count')
-            ->selectRaw('COALESCE(SUM(property_summary.total_properties), 0) as total_properties')
-            ->selectRaw('COALESCE(SUM(property_summary.active_subscribed_properties), 0) as active_subscribed_properties')
-            ->selectRaw('COALESCE(SUM(property_summary.expired_properties), 0) as expired_properties')
-            ->selectRaw('COALESCE(SUM(property_summary.unsubscribed_properties), 0) as unsubscribed_properties')
-            ->selectRaw('COALESCE(SUM(payment_summary.payments_count), 0) as payments_count')
-            ->selectRaw('COALESCE(SUM(payment_summary.total_collected_amount_cents), 0) as total_collected_amount_cents')
-            ->first();
+        $totals = $this->cachedWorkspaceReportTotals($filters, $paymentSummary, $propertySummary);
 
         return [
             'filters' => [
@@ -398,14 +398,24 @@ class PropertySubscriptionService
 
     public function expiredPropertiesReport(array $filters = []): LengthAwarePaginator
     {
-        $statusExpression = $this->effectiveStatusExpression('property_subscriptions');
         $query = DB::connection('base')->table('workspace_properties')
             ->join('tenants', 'tenants.id', '=', 'workspace_properties.tenant_id')
             ->leftJoin('property_subscriptions', 'property_subscriptions.workspace_property_id', '=', 'workspace_properties.id')
             ->leftJoin('billing_rules', 'billing_rules.id', '=', 'property_subscriptions.billing_rule_id')
             ->leftJoin('billing_profiles', 'billing_profiles.id', '=', 'billing_rules.billing_profile_id')
             ->whereNull('workspace_properties.property_deleted_at')
-            ->whereRaw("{$statusExpression} IN ('expired', 'unsubscribed')")
+            ->where(function ($builder) {
+                $builder
+                    ->whereNull('property_subscriptions.id')
+                    ->orWhere('property_subscriptions.status', PropertySubscription::STATUS_UNSUBSCRIBED)
+                    ->orWhere('property_subscriptions.status', PropertySubscription::STATUS_EXPIRED)
+                    ->orWhere(function ($expiredBuilder) {
+                        $expiredBuilder
+                            ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
+                            ->whereNotNull('property_subscriptions.current_period_ends_on')
+                            ->where('property_subscriptions.current_period_ends_on', '<', Carbon::today()->toDateString());
+                    });
+            })
             ->select([
                 'tenants.uuid as workspace_uuid',
                 'tenants.name as workspace_name',
@@ -425,20 +435,23 @@ class PropertySubscriptionService
                 'billing_rules.price_cents',
                 'billing_profiles.currency',
             ])
-            ->selectRaw("{$statusExpression} as effective_status");
+            ->selectRaw($this->effectiveStatusExpression('property_subscriptions').' as effective_status');
 
         if (!empty($filters['search'] ?? null)) {
-            $search = strtolower(trim((string) $filters['search']));
+            $search = trim((string) $filters['search']);
             $query->where(function ($builder) use ($search) {
-                $builder
-                    ->whereRaw('LOWER(workspace_properties.property_name) LIKE ?', [$search.'%'])
-                    ->orWhereRaw('LOWER(tenants.display_name) LIKE ?', [$search.'%'])
-                    ->orWhereRaw('LOWER(tenants.name) LIKE ?', [$search.'%']);
+                $this->applyPrefixSearch($builder, 'workspace_properties.property_name', $search)
+                    ->orWhere(function ($displayNameBuilder) use ($search) {
+                        $this->applyPrefixSearch($displayNameBuilder, 'tenants.display_name', $search);
+                    })
+                    ->orWhere(function ($nameBuilder) use ($search) {
+                        $this->applyPrefixSearch($nameBuilder, 'tenants.name', $search);
+                    });
             });
         }
 
         if (!empty($filters['status'] ?? null)) {
-            $query->whereRaw("{$statusExpression} = ?", [$filters['status']]);
+            $this->applyExpiredPropertiesStatusFilter($query, (string) $filters['status']);
         }
 
         $this->applyExpiredPropertySort($query, $filters['sort'] ?? null);
@@ -453,7 +466,7 @@ class PropertySubscriptionService
         return PropertySubscription::query()
             ->where('status', PropertySubscription::STATUS_ACTIVE)
             ->whereNotNull('current_period_ends_on')
-            ->whereDate('current_period_ends_on', '<', Carbon::today()->toDateString())
+            ->where('current_period_ends_on', '<', Carbon::today()->toDateString())
             ->update([
                 'status' => PropertySubscription::STATUS_EXPIRED,
                 'expired_on' => DB::raw('current_period_ends_on'),
@@ -484,11 +497,11 @@ class PropertySubscriptionService
             ->with('profile:id,uuid,name,billing_interval,currency,status')
             ->where('uuid', $billingRuleUuid)
             ->where('status', 'active')
-            ->whereDate('effective_from', '<=', $paymentDate)
+            ->where('effective_from', '<=', $paymentDate)
             ->where(function (EloquentBuilder $builder) use ($paymentDate) {
                 $builder
                     ->whereNull('effective_to')
-                    ->orWhereDate('effective_to', '>=', $paymentDate);
+                    ->orWhere('effective_to', '>=', $paymentDate);
             })
             ->first();
 
@@ -560,7 +573,7 @@ class PropertySubscriptionService
                 ->where(function (EloquentBuilder $builder) use ($alias) {
                     $builder
                         ->whereNull("{$alias}.current_period_ends_on")
-                        ->orWhereDate("{$alias}.current_period_ends_on", '>=', Carbon::today()->toDateString());
+                        ->orWhere("{$alias}.current_period_ends_on", '>=', Carbon::today()->toDateString());
                 }),
             PropertySubscription::STATUS_EXPIRED => $query->where(function (EloquentBuilder $builder) use ($alias) {
                 $builder
@@ -568,7 +581,7 @@ class PropertySubscriptionService
                     ->orWhere(function (EloquentBuilder $innerQuery) use ($alias) {
                         $innerQuery
                             ->where("{$alias}.status", PropertySubscription::STATUS_ACTIVE)
-                            ->whereDate("{$alias}.current_period_ends_on", '<', Carbon::today()->toDateString());
+                            ->where("{$alias}.current_period_ends_on", '<', Carbon::today()->toDateString());
                     });
             }),
             PropertySubscription::STATUS_UNSUBSCRIBED => $query->where(function (EloquentBuilder $builder) use ($alias) {
@@ -622,12 +635,88 @@ class PropertySubscriptionService
     {
         return $workspaceProperty->payments()
             ->with($this->paymentRelations())
-            ->whereDate('coverage_starts_on', '<=', Carbon::today()->toDateString())
-            ->whereDate('coverage_ends_on', '>=', Carbon::today()->toDateString())
+            ->where('coverage_starts_on', '<=', Carbon::today()->toDateString())
+            ->where('coverage_ends_on', '>=', Carbon::today()->toDateString())
             ->orderByDesc('coverage_ends_on')
             ->orderByDesc('payment_date')
             ->orderByDesc('created_at')
             ->first();
+    }
+
+    private function cachedWorkspaceReportTotals(array $filters, $paymentSummary, $propertySummary): object
+    {
+        $cacheKey = 'billing.workspace_report.totals.'.md5(json_encode([
+            'search' => $filters['search'] ?? null,
+            'workspace_status' => $filters['workspace_status'] ?? null,
+            'start_date' => $filters['start_date'] ?? null,
+            'end_date' => $filters['end_date'] ?? null,
+        ]));
+
+        return Cache::remember($cacheKey, now()->addSeconds(self::WORKSPACE_REPORT_TOTALS_CACHE_TTL_SECONDS), function () use ($filters, $paymentSummary, $propertySummary) {
+            return DB::connection('base')->table('tenants')
+                ->leftJoinSub($paymentSummary, 'payment_summary', 'payment_summary.tenant_id', '=', 'tenants.id')
+                ->leftJoinSub($propertySummary, 'property_summary', 'property_summary.tenant_id', '=', 'tenants.id')
+                ->when(!empty($filters['search'] ?? null), function ($builder) use ($filters) {
+                    $search = trim((string) $filters['search']);
+                    $builder->where(function ($innerQuery) use ($search) {
+                        $this->applyPrefixSearch($innerQuery, 'tenants.display_name', $search)
+                            ->orWhere(function ($nameQuery) use ($search) {
+                                $this->applyPrefixSearch($nameQuery, 'tenants.name', $search);
+                            });
+                    });
+                })
+                ->when(!empty($filters['workspace_status'] ?? null), fn ($builder) => $builder->where('tenants.status', $filters['workspace_status']))
+                ->selectRaw('COUNT(tenants.id) as workspaces_count')
+                ->selectRaw('COALESCE(SUM(property_summary.total_properties), 0) as total_properties')
+                ->selectRaw('COALESCE(SUM(property_summary.active_subscribed_properties), 0) as active_subscribed_properties')
+                ->selectRaw('COALESCE(SUM(property_summary.expired_properties), 0) as expired_properties')
+                ->selectRaw('COALESCE(SUM(property_summary.unsubscribed_properties), 0) as unsubscribed_properties')
+                ->selectRaw('COALESCE(SUM(payment_summary.payments_count), 0) as payments_count')
+                ->selectRaw('COALESCE(SUM(payment_summary.total_collected_amount_cents), 0) as total_collected_amount_cents')
+                ->first();
+        });
+    }
+
+    private function applyExpiredPropertiesStatusFilter($query, string $status): void
+    {
+        match ($status) {
+            PropertySubscription::STATUS_UNSUBSCRIBED => $query->where(function ($builder) {
+                $builder
+                    ->whereNull('property_subscriptions.id')
+                    ->orWhere('property_subscriptions.status', PropertySubscription::STATUS_UNSUBSCRIBED);
+            }),
+            PropertySubscription::STATUS_EXPIRED => $query->where(function ($builder) {
+                $builder
+                    ->where('property_subscriptions.status', PropertySubscription::STATUS_EXPIRED)
+                    ->orWhere(function ($innerBuilder) {
+                        $innerBuilder
+                            ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
+                            ->whereNotNull('property_subscriptions.current_period_ends_on')
+                            ->where('property_subscriptions.current_period_ends_on', '<', Carbon::today()->toDateString());
+                    });
+            }),
+            default => null,
+        };
+    }
+
+    private function applyPrefixSearch($query, string $column, string $search)
+    {
+        $search = trim($search);
+
+        if ($search === '') {
+            return $query;
+        }
+
+        if ($this->usesPostgresCaseSensitiveLike()) {
+            return $query->whereRaw('LOWER('.$column.') LIKE ?', [mb_strtolower($search, 'UTF-8').'%']);
+        }
+
+        return $query->where($column, 'like', $search.'%');
+    }
+
+    private function usesPostgresCaseSensitiveLike(): bool
+    {
+        return DB::connection('base')->getDriverName() === 'pgsql';
     }
 
     private function paymentRelations(): array
