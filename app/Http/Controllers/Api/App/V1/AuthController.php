@@ -25,6 +25,7 @@ use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use RuntimeException;
 
 class AuthController extends Controller
 {
@@ -110,7 +111,17 @@ class AuthController extends Controller
             return ApiResponse::error('Invalid credentials', ['auth' => ['The provided credentials are incorrect.']], 401);
         }
 
-        $otp = $this->otp->create((int) $user->id, 'login', 'log');
+        try {
+            $otp = $this->otp->create((int) $user->id, 'login');
+        } catch (RuntimeException $exception) {
+            report($exception);
+
+            return ApiResponse::error(
+                'OTP could not be sent at this time.',
+                ['otp' => ['Please try again in a moment.']],
+                503
+            );
+        }
 
         return ApiResponse::resource(
             new OtpChallengeResource(['challenge_id' => $otp['challenge_id']]),
@@ -153,7 +164,17 @@ class AuthController extends Controller
             return ApiResponse::success('If the account exists, an OTP has been sent', null, 202);
         }
 
-        $this->otp->create((int) $user->id, 'password_reset', 'log');
+        try {
+            $this->otp->create((int) $user->id, 'password_reset');
+        } catch (RuntimeException $exception) {
+            report($exception);
+
+            return ApiResponse::error(
+                'OTP could not be sent at this time.',
+                ['otp' => ['Please try again in a moment.']],
+                503
+            );
+        }
 
         return ApiResponse::success('OTP sent', null, 202);
     }

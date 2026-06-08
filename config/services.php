@@ -35,4 +35,14 @@ return [
         ],
     ],
 
+    'sms' => [
+        'enabled' => (bool) env('SMS_ENABLED', false),
+        'driver' => env('SMS_DRIVER', 'nextsms'),
+        'endpoint' => env('SMS_ENDPOINT', 'https://messaging-service.co.tz/api/sms/v1/text/single'),
+        'api_key' => env('SMS_API_KEY'),
+        'secret_key' => env('SMS_SECRET_KEY'),
+        'sender_id' => env('SMS_SENDER_ID', 'NEXTSMS'),
+        'timeout' => (int) env('SMS_TIMEOUT', 15),
+    ],
+
 ];

@@ -2,37 +2,60 @@
 
 namespace App\Services\V1;
 
+use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\OtpToken;
+use App\Services\V1\Messaging\SmsService;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
+use Throwable;
 
 class OtpService
 {
-    public function create(int $userId, string $purpose = 'login', string $channel = 'log'): array
+    public function __construct(
+        private SmsService $smsService,
+    ) {
+    }
+
+    public function create(int $userId, string $purpose = 'login', ?string $channel = null): array
     {
-        $length = (int) env('OTP_LENGTH', 6);
-        $ttl = (int) env('OTP_TTL', 300);
-        $maxAttempts = (int) env('OTP_MAX_ATTEMPTS', 5);
+        $length = (int) config('otp.length', 6);
+        $ttl = (int) config('otp.ttl', 300);
+        $maxAttempts = (int) config('otp.max_attempts', 5);
+        $channel = $this->resolveChannel($channel);
 
         $code = $this->generateCode($length);
         $hash = $this->hashCode($code);
 
-        $token = new OtpToken();
-        $token->user_id = $userId;
-        $token->purpose = $purpose;
-        $token->code_hash = $hash;
-        $token->channel = $channel;
-        $token->expires_at = now()->addSeconds($ttl);
-        $token->attempts = 0;
-        $token->max_attempts = $maxAttempts;
-        $token->save();
+        $token = DB::connection('base')->transaction(function () use ($userId, $purpose, $hash, $channel, $ttl, $maxAttempts) {
+            $token = new OtpToken();
+            $token->user_id = $userId;
+            $token->purpose = $purpose;
+            $token->code_hash = $hash;
+            $token->channel = $channel;
+            $token->expires_at = now()->addSeconds($ttl);
+            $token->attempts = 0;
+            $token->max_attempts = $maxAttempts;
+            $token->save();
 
-        if ($channel === 'log') {
-            Log::info('[OTP] purpose='.$purpose.' user_id='.$userId.' code='.$code.' challenge_id='.$token->uuid);
+            return $token;
+        });
+
+        try {
+            $this->deliverCode($token, $code, $ttl);
+        } catch (Throwable $exception) {
+            OtpToken::query()->whereKey($token->id)->delete();
+
+            throw $exception;
         }
 
-        return ['challenge_id' => $token->uuid, 'code_dev' => $code];
+        $result = ['challenge_id' => $token->uuid];
+
+        if ((bool) config('app.debug', false)) {
+            $result['code_dev'] = $code;
+        }
+
+        return $result;
     }
 
     public function verify(string $challengeUuid, string $code, string $purpose = 'login'): bool
@@ -80,5 +103,57 @@ class OtpService
             $secret = $decoded === false ? 'secret' : $decoded;
         }
         return hash('sha256', $code.'|'.$secret);
+    }
+
+    private function resolveChannel(?string $channel): string
+    {
+        $channel = trim((string) $channel);
+
+        if ($channel !== '') {
+            return $channel;
+        }
+
+        $configured = trim((string) config('otp.delivery_channel', 'log'));
+
+        if ($configured === 'sms' && !$this->smsService->isEnabled()) {
+            if ((bool) config('otp.log_fallback', true)) {
+                return 'log';
+            }
+
+            throw new RuntimeException('OTP SMS delivery is enabled in configuration, but SMS transport is not configured.');
+        }
+
+        return $configured !== '' ? $configured : 'log';
+    }
+
+    private function deliverCode(OtpToken $token, string $code, int $ttl): void
+    {
+        if ($token->channel === 'log') {
+            Log::info('[OTP] purpose='.$token->purpose.' user_id='.$token->user_id.' code='.$code.' challenge_id='.$token->uuid);
+
+            return;
+        }
+
+        if ($token->channel !== 'sms') {
+            throw new RuntimeException(sprintf('Unsupported OTP delivery channel [%s].', $token->channel));
+        }
+
+        $user = BaseUser::query()->find($token->user_id);
+
+        if (!$user || blank($user->phone)) {
+            throw new RuntimeException('OTP could not be sent because the user has no phone number.');
+        }
+
+        $message = strtr((string) config('otp.sms_template'), [
+            ':code' => $code,
+            ':minutes' => (string) max((int) ceil($ttl / 60), 1),
+            ':purpose' => (string) $token->purpose,
+        ]);
+
+        $this->smsService->sendText((string) $user->phone, $message, null, [
+            'purpose' => $token->purpose,
+            'user_id' => $token->user_id,
+            'challenge_id' => $token->uuid,
+        ]);
     }
 }
