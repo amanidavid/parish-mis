@@ -14,7 +14,7 @@ use App\Http\Resources\App\V1\AppSessionResource;
 use App\Http\Resources\App\V1\OtpChallengeResource;
 use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\OtpToken;
-use App\Models\Tenancy\Tenant;
+use App\Models\Landlord\UserTenant;
 use App\Services\V1\JwtService;
 use App\Services\V1\OtpService;
 use App\Services\V1\SubscriptionService;
@@ -105,7 +105,7 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $user = $this->resolveBaseUserForWorkspaceCredential($data);
+        $user = $this->resolveBaseUserForCredential($data);
 
         if (!$user || !Hash::check($data['password'], (string) $user->password)) {
             return ApiResponse::error('Invalid credentials', ['auth' => ['The provided credentials are incorrect.']], 401);
@@ -158,14 +158,14 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $user = $this->resolveBaseUserForWorkspaceCredential($data, false);
+        $user = $this->resolveBaseUserForCredential($data, false);
 
         if (!$user) {
             return ApiResponse::success('If the account exists, an OTP has been sent', null, 202);
         }
 
         try {
-            $this->otp->create((int) $user->id, 'password_reset');
+            $otp = $this->otp->create((int) $user->id, 'password_reset');
         } catch (RuntimeException $exception) {
             report($exception);
 
@@ -176,7 +176,11 @@ class AuthController extends Controller
             );
         }
 
-        return ApiResponse::success('OTP sent', null, 202);
+        return ApiResponse::resource(
+            new OtpChallengeResource(['challenge_id' => $otp['challenge_id']]),
+            'OTP sent',
+            202
+        );
     }
 
     public function resetPassword(ResetPasswordRequest $request)
@@ -282,29 +286,12 @@ class AuthController extends Controller
             ->get();
     }
 
-    private function resolveBaseUserForWorkspaceCredential(array $data, bool $failOnAmbiguous = true): ?BaseUser
+    private function resolveBaseUserForCredential(array $data, bool $failOnAmbiguous = true): ?BaseUser
     {
-        $workspaceUuid = $data['workspace_uuid'] ?? null;
         $phone = !empty($data['phone'] ?? null)
             ? $this->composePhoneNumber($data['country_code'] ?? null, $data['phone'])
             : null;
         $email = $this->normalizeEmail($data['email'] ?? null);
-
-        if (!empty($workspaceUuid)) {
-            $workspace = Tenant::query()->where('uuid', $workspaceUuid)->first();
-            if (!$workspace) {
-                return null;
-            }
-
-            return BaseUser::query()
-                ->select('users.*')
-                ->join('user_tenants', 'user_tenants.user_id', '=', 'users.id')
-                ->where('user_tenants.tenant_id', $workspace->id)
-                ->when($phone !== null, fn ($query) => $query->where('users.phone', $phone))
-                ->when($phone === null && !empty($email), fn ($query) => $query->where('users.email', $email))
-                ->orderByDesc('user_tenants.is_owner')
-                ->first();
-        }
 
         $query = BaseUser::query();
         $query = $phone !== null
@@ -313,14 +300,40 @@ class AuthController extends Controller
 
         $count = (clone $query)->count();
         if ($count > 1 && $failOnAmbiguous) {
-            throw new HttpResponseException(ApiResponse::error(
-                'Workspace selection is required.',
-                ['workspace_uuid' => ['Provide the workspace identifier for this account.']],
-                422
-            ));
+            return $this->throwSingleAccountRequired();
         }
 
-        return $query->first();
+        $user = $query->first();
+
+        if (!$user) {
+            return null;
+        }
+
+        $membershipCount = UserTenant::query()->where('user_id', $user->id)->count();
+
+        if ($membershipCount > 1) {
+            return $this->throwSingleWorkspaceRequired();
+        }
+
+        return $membershipCount === 1 ? $user : null;
+    }
+
+    private function throwSingleAccountRequired(): never
+    {
+        throw new HttpResponseException(ApiResponse::error(
+            'This phone or email matches multiple accounts.',
+            ['auth' => ['Please contact support because this account is linked more than once.']],
+            422
+        ));
+    }
+
+    private function throwSingleWorkspaceRequired(): never
+    {
+        throw new HttpResponseException(ApiResponse::error(
+            'This account is linked to multiple workspaces.',
+            ['auth' => ['This login flow supports one account for one workspace only. Please contact support.']],
+            422
+        ));
     }
 
     private function resolveRegistrationUsername(?string $username, string $name, string $phone): string

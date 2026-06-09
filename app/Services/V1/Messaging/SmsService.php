@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 class SmsService
@@ -21,15 +22,18 @@ class SmsService
         return (bool) config('services.sms.enabled', false);
     }
 
-    public function sendText(string $recipient, string $message, ?string $senderId = null, array $context = []): array
+    public function sendText(string|array $recipients, string $message, ?string $senderId = null, array $context = [], ?string $reference = null): array
     {
         $this->assertConfigured();
 
         $payload = [
             'from' => $senderId ?: (string) config('services.sms.sender_id'),
-            'to' => $this->normalizeRecipient($recipient),
+            'to' => $this->normalizeRecipients($recipients),
             'text' => trim($message),
+            'reference' => $reference ?: $this->buildReference(),
         ];
+
+        $response = null;
 
         try {
             $response = $this->request()->post((string) config('services.sms.endpoint'), $payload);
@@ -37,10 +41,12 @@ class SmsService
         } catch (Throwable $exception) {
             Log::error('SMS delivery failed.', [
                 'provider' => (string) config('services.sms.driver', 'nextsms'),
-                'recipient' => $this->maskRecipient($payload['to']),
+                'recipient' => $this->maskRecipients($payload['to']),
                 'sender_id' => $payload['from'],
                 'context' => $context,
                 'error' => $exception->getMessage(),
+                'provider_status' => $response?->status(),
+                'provider_response' => $response ? $this->responseBodySummary($response) : null,
             ]);
 
             throw new SmsDeliveryException('SMS delivery failed.', 0, $exception);
@@ -54,7 +60,7 @@ class SmsService
 
     private function request(): PendingRequest
     {
-        return $this->http
+        $request = $this->http
             ->acceptJson()
             ->asJson()
             ->timeout((int) config('services.sms.timeout', 15))
@@ -62,6 +68,17 @@ class SmsService
                 (string) config('services.sms.api_key'),
                 (string) config('services.sms.secret_key'),
             );
+
+        $caBundle = trim((string) config('services.sms.ca_bundle', ''));
+        if ($caBundle !== '') {
+            return $request->withOptions(['verify' => $caBundle]);
+        }
+
+        if (!(bool) config('services.sms.verify_ssl', true)) {
+            return $request->withoutVerifying();
+        }
+
+        return $request;
     }
 
     private function throwIfFailed(Response $response): void
@@ -88,25 +105,66 @@ class SmsService
         }
     }
 
-    private function normalizeRecipient(string $recipient): string
+    private function normalizeRecipients(string|array $recipients): array
     {
-        $recipient = trim($recipient);
+        $recipients = is_array($recipients) ? $recipients : [$recipients];
+        $normalized = [];
 
-        if ($recipient === '') {
+        foreach ($recipients as $recipient) {
+            $recipient = trim((string) $recipient);
+
+            if ($recipient === '') {
+                continue;
+            }
+
+            if (str_starts_with($recipient, '+')) {
+                $normalized[] = '+'.preg_replace('/\D+/', '', substr($recipient, 1));
+
+                continue;
+            }
+
+            $normalized[] = preg_replace('/\D+/', '', $recipient);
+        }
+
+        if ($normalized === []) {
             throw new SmsDeliveryException('SMS recipient is required.');
         }
 
-        if (str_starts_with($recipient, '+')) {
-            return '+'.preg_replace('/\D+/', '', substr($recipient, 1));
-        }
-
-        return preg_replace('/\D+/', '', $recipient);
+        return array_values(array_unique($normalized));
     }
 
-    private function maskRecipient(string $recipient): string
+    private function maskRecipients(array $recipients): array
     {
-        $visible = substr($recipient, -4);
+        return array_map(function (string $recipient) {
+            $visible = substr($recipient, -4);
 
-        return str_repeat('*', max(strlen($recipient) - 4, 0)).$visible;
+            return str_repeat('*', max(strlen($recipient) - 4, 0)).$visible;
+        }, $recipients);
+    }
+
+    private function responseBodySummary(Response $response): array|string|null
+    {
+        $json = $response->json();
+
+        if (is_array($json)) {
+            return $json;
+        }
+
+        $body = trim($response->body());
+
+        if ($body === '') {
+            return null;
+        }
+
+        if (mb_strlen($body) > 500) {
+            return mb_substr($body, 0, 500).'...';
+        }
+
+        return $body;
+    }
+
+    private function buildReference(): string
+    {
+        return 'sms-'.Str::lower(Str::random(12));
     }
 }

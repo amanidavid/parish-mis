@@ -43,6 +43,8 @@ return [
         'secret_key' => env('SMS_SECRET_KEY'),
         'sender_id' => env('SMS_SENDER_ID', 'NEXTSMS'),
         'timeout' => (int) env('SMS_TIMEOUT', 15),
+        'verify_ssl' => (bool) env('SMS_VERIFY_SSL', true),
+        'ca_bundle' => env('SMS_CA_BUNDLE'),
     ],
 
 ];
