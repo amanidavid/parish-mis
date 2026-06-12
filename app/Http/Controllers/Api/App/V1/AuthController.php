@@ -111,22 +111,17 @@ class AuthController extends Controller
             return ApiResponse::error('Invalid credentials', ['auth' => ['The provided credentials are incorrect.']], 401);
         }
 
-        try {
-            $otp = $this->otp->create((int) $user->id, 'login');
-        } catch (RuntimeException $exception) {
-            report($exception);
-
-            return ApiResponse::error(
-                'OTP could not be sent at this time.',
-                ['otp' => ['Please try again in a moment.']],
-                503
-            );
-        }
+        [$token, $expiresIn] = $this->jwt->issueTokenForSubject((string) $user->uuid);
 
         return ApiResponse::resource(
-            new OtpChallengeResource(['challenge_id' => $otp['challenge_id']]),
-            'OTP sent',
-            202
+            new AppSessionResource([
+                'access_token' => $token,
+                'token_type' => 'bearer',
+                'expires_in' => $expiresIn,
+                'user' => $user,
+                'tenants' => $this->tenantMemberships($user->id),
+            ]),
+            'Login successful.'
         );
     }
 

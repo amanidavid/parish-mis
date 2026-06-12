@@ -9,6 +9,8 @@ class AppSessionResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $tenants = collect($this['tenants']);
+
         return [
             'access_token' => $this['access_token'],
             'token_type' => $this['token_type'],
@@ -20,7 +22,8 @@ class AppSessionResource extends JsonResource
                 'email' => $this['user']->email,
                 'phone' => $this['user']->phone,
             ],
-            'tenants' => TenantWorkspaceResource::collection(collect($this['tenants'])),
+            'tenant' => $tenants->isNotEmpty() ? new TenantWorkspaceResource($tenants->first()) : null,
+            'tenants' => TenantWorkspaceResource::collection($tenants),
         ];
     }
 }
