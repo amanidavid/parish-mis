@@ -4,6 +4,7 @@ namespace App\Services\V1\Billing;
 
 use App\Models\Landlord\AutomationTaskRun;
 use App\Models\Landlord\AutomationTaskSetting;
+use App\Services\V1\Occupancy\CustomerContractAutomationService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,7 @@ class PropertySubscriptionAutomationService
 {
     public function __construct(
         private PropertySubscriptionService $propertySubscriptionService,
+        private CustomerContractAutomationService $customerContractAutomationService,
     ) {
     }
 
@@ -119,12 +121,11 @@ class PropertySubscriptionAutomationService
             } else {
                 $rowsAffected = match ($taskSetting->task_key) {
                     AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $this->propertySubscriptionService->syncExpiredPropertySubscriptions(),
+                    AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $this->customerContractAutomationService->syncReadyTenants(),
                     default => throw new InvalidArgumentException('Unsupported automation task.'),
                 };
 
-                $message = $rowsAffected > 0
-                    ? sprintf('Automation task completed successfully. %d property subscription rows were updated.', $rowsAffected)
-                    : 'Automation task completed successfully. No property subscription rows required updating.';
+                $message = $this->successMessageForTask($taskSetting->task_key, $rowsAffected);
             }
         } catch (\Throwable $exception) {
             $status = AutomationTaskRun::STATUS_FAILED;
@@ -168,9 +169,35 @@ class PropertySubscriptionAutomationService
 
     private function ensureDefaultTasks(): void
     {
-        AutomationTaskSetting::query()->firstOrCreate(
-            ['task_key' => AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC],
-            [
+        foreach ($this->defaultTasks() as $taskKey => $taskDefinition) {
+            AutomationTaskSetting::query()->firstOrCreate(
+                ['task_key' => $taskKey],
+                $taskDefinition
+            );
+        }
+    }
+
+    private function ensureSupportedTask(AutomationTaskSetting $taskSetting): void
+    {
+        if (!array_key_exists($taskSetting->task_key, $this->defaultTasks())) {
+            throw new InvalidArgumentException('The requested automation task is not supported.');
+        }
+    }
+
+    private function defaultTasks(): array
+    {
+        return [
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => [
+                'name' => 'Customer Contract Expiry Sync',
+                'description' => 'Automatically expires ended customer contracts and refreshes unit occupancy across ready workspaces.',
+                'enabled' => true,
+                'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
+                'interval_minutes' => 15,
+                'timezone' => 'Africa/Nairobi',
+                'next_run_at' => now()->addMinutes(15),
+                'meta' => ['supports_run_now' => true],
+            ],
+            AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => [
                 'name' => 'Property Subscription Expiry Sync',
                 'description' => 'Automatically marks property subscriptions as expired after their paid coverage ends.',
                 'enabled' => true,
@@ -179,15 +206,21 @@ class PropertySubscriptionAutomationService
                 'timezone' => 'Africa/Nairobi',
                 'next_run_at' => now()->addMinutes(15),
                 'meta' => ['supports_run_now' => true],
-            ]
-        );
+            ],
+        ];
     }
 
-    private function ensureSupportedTask(AutomationTaskSetting $taskSetting): void
+    private function successMessageForTask(string $taskKey, int $rowsAffected): string
     {
-        if ($taskSetting->task_key !== AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC) {
-            throw new InvalidArgumentException('The requested automation task is not supported.');
-        }
+        return match ($taskKey) {
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $rowsAffected > 0
+                ? sprintf('Automation task completed successfully. %d customer contract and unit rows were updated.', $rowsAffected)
+                : 'Automation task completed successfully. No customer contract or unit rows required updating.',
+            AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $rowsAffected > 0
+                ? sprintf('Automation task completed successfully. %d property subscription rows were updated.', $rowsAffected)
+                : 'Automation task completed successfully. No property subscription rows required updating.',
+            default => 'Automation task completed successfully.',
+        };
     }
 
     private function isDue(AutomationTaskSetting $taskSetting, Carbon $now): bool

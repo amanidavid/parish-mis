@@ -17,6 +17,7 @@ use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Models\Tenant\Ward;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
+use App\Services\V1\PropertyMetricsService;
 use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
@@ -32,6 +33,7 @@ class PropertyController extends Controller
         private SubscriptionService $subscriptionService,
         private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
+        private PropertyMetricsService $propertyMetricsService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     )
     {
@@ -162,7 +164,7 @@ class PropertyController extends Controller
         $this->authorize('view', $property);
 
         return ApiResponse::resource(
-            new PropertyResource($property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])),
+            new PropertyResource($this->loadPropertyDetails($property)),
             'Property details'
         );
     }
@@ -475,5 +477,21 @@ class PropertyController extends Controller
         }
 
         return null;
+    }
+
+    private function loadPropertyDetails(Property $property): Property
+    {
+        $property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])
+            ->loadCount(['floors', 'units']);
+
+        $metrics = $this->propertyMetricsService->forProperty((int) $property->id);
+
+        $property->setAttribute('occupied_count', (int) ($metrics['occupied_count'] ?? 0));
+        $property->setAttribute('vacant_count', (int) ($metrics['vacant_count'] ?? 0));
+        $property->setAttribute('maintenance_count', (int) ($metrics['maintenance_count'] ?? 0));
+        $property->setAttribute('contracts_count', (int) ($metrics['contracts_count'] ?? 0));
+        $property->setAttribute('contract_statuses', $metrics['contract_statuses'] ?? []);
+
+        return $property;
     }
 }

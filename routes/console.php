@@ -145,6 +145,17 @@ Artisan::command('billing:sync-property-subscription-statuses {--force}', functi
     return self::SUCCESS;
 })->purpose('Update expired property subscription statuses in the landlord billing ledger');
 
+Artisan::command('contracts:sync-statuses {--force}', function () {
+    $force = (bool) $this->option('force');
+    $service = app(PropertySubscriptionAutomationService::class);
+
+    $run = $service->runTaskByKey(AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC, $force);
+
+    $this->info($run?->message ?? 'Customer contract status sync completed.');
+
+    return self::SUCCESS;
+})->purpose('Update expired customer contracts and refresh unit occupancy across ready tenant databases');
+
 Artisan::command('billing:run-automation', function () {
     $executed = app(PropertySubscriptionAutomationService::class)->runDueTasks();
 

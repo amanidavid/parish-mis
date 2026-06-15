@@ -15,6 +15,7 @@ use App\Http\Resources\App\V1\OtpChallengeResource;
 use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\OtpToken;
 use App\Models\Landlord\UserTenant;
+use App\Models\Tenant\Country;
 use App\Services\V1\JwtService;
 use App\Services\V1\OtpService;
 use App\Services\V1\SubscriptionService;
@@ -196,6 +197,7 @@ class AuthController extends Controller
 
     public function me()
     {
+        $baseUser = request()->attributes->get('base_user');
         $tenantUser = request()->attributes->get('tenant_user');
         if ($tenantUser) {
             $tenantUser->loadMissing([
@@ -205,7 +207,8 @@ class AuthController extends Controller
         }
 
         return ApiResponse::resource(new AppMeResource([
-            'base_user' => request()->attributes->get('base_user'),
+            'base_user' => $baseUser,
+            'country' => $baseUser instanceof BaseUser ? $this->resolveBaseUserCountry($baseUser) : null,
             'tenant' => request()->attributes->get('tenant'),
             'tenant_user' => $tenantUser,
             'subscription' => request()->attributes->get('tenant')
@@ -394,5 +397,19 @@ class AuthController extends Controller
         $username = trim((string) $username);
 
         return $username !== '' ? Str::lower($username) : null;
+    }
+
+    private function resolveBaseUserCountry(BaseUser $baseUser): ?Country
+    {
+        $countryCode = $this->normalizeCountryCode(data_get($baseUser->meta, 'country_code'));
+
+        if ($countryCode === '') {
+            return null;
+        }
+
+        return Country::query()
+            ->select(['id', 'uuid', 'name', 'code', 'dial_code'])
+            ->where('dial_code', $countryCode)
+            ->first();
     }
 }

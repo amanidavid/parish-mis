@@ -9,16 +9,25 @@ class AppMeResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
+        $country = $this['country'];
         $tenantUser = $this['tenant_user'];
+        $baseUserPayload = [
+            'uuid' => $this['base_user']->uuid,
+            'username' => $this['base_user']->username,
+            'name' => $this['base_user']->name,
+            'email' => $this['base_user']->email,
+            'phone' => $this['base_user']->phone,
+            'country' => $country ? [
+                'uuid' => $country->uuid,
+                'name' => $country->name,
+                'code' => $country->code,
+                'dial_code' => $country->dial_code,
+            ] : null,
+        ];
 
         return [
-            'base_user' => [
-                'uuid' => $this['base_user']->uuid,
-                'username' => $this['base_user']->username,
-                'name' => $this['base_user']->name,
-                'email' => $this['base_user']->email,
-                'phone' => $this['base_user']->phone,
-            ],
+            'user' => $baseUserPayload,
+            'base_user' => $baseUserPayload,
             'tenant' => $this['tenant'] ? [
                 'uuid' => $this['tenant']->uuid,
                 'name' => $this['tenant']->name,

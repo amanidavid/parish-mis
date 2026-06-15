@@ -43,6 +43,26 @@ class PropertyResource extends ApiJsonResource
             'status' => $this->status,
             'floors_count' => $this->whenCounted('floors'),
             'units_count' => $this->whenCounted('units'),
+            'occupied_count' => $this->when(
+                $this->resource->offsetExists('occupied_count') || $this->resource->offsetExists('contract_statuses'),
+                fn () => (int) ($this->occupied_count ?? 0)
+            ),
+            'vacant_count' => $this->when(
+                $this->resource->offsetExists('occupied_count') || $this->resource->offsetExists('contract_statuses'),
+                fn () => (int) ($this->vacant_count ?? 0)
+            ),
+            'maintenance_count' => $this->when(
+                $this->resource->offsetExists('occupied_count') || $this->resource->offsetExists('contract_statuses'),
+                fn () => (int) ($this->maintenance_count ?? 0)
+            ),
+            'contracts_count' => $this->when(
+                $this->resource->offsetExists('occupied_count') || $this->resource->offsetExists('contract_statuses'),
+                fn () => (int) ($this->contracts_count ?? 0)
+            ),
+            'contract_statuses' => $this->when(
+                $this->resource->offsetExists('contract_statuses'),
+                fn () => $this->contract_statuses ?? []
+            ),
             ...$this->timestamps(),
         ];
     }
