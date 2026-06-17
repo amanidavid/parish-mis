@@ -110,7 +110,7 @@ class PropertyAssignmentAccessService
             return $query->whereRaw('1 = 0');
         }
 
-        /* Resolve floor IDs once per request — avoids nested whereHas subquery on units */
+        // Resolve floor IDs once per request to avoid nested whereHas on units.
         $floorIds = PropertyFloor::query()
             ->whereIn('property_id', $ids)
             ->pluck('id')
@@ -133,7 +133,7 @@ class PropertyAssignmentAccessService
             return $query->whereRaw('1 = 0');
         }
 
-        /* Resolve floor IDs once — avoids nested whereHas subquery on contracts */
+        // Resolve floor IDs once to avoid nested whereHas on contracts.
         $floorIds = PropertyFloor::query()
             ->whereIn('property_id', $ids)
             ->pluck('id')
@@ -148,27 +148,7 @@ class PropertyAssignmentAccessService
 
     public function scopeCustomers(Builder $query, User $user): Builder
     {
-        if ($this->canBypassPropertyScope($user)) {
-            return $query;
-        }
-
-        $ids = $this->assignedPropertyIds($user);
-
-        if ($ids === []) {
-            return $query->whereRaw('1 = 0');
-        }
-
-        /* Resolve floor IDs once — avoids triple-nested whereHas subquery */
-        $floorIds = PropertyFloor::query()
-            ->whereIn('property_id', $ids)
-            ->pluck('id')
-            ->all();
-
-        if ($floorIds === []) {
-            return $query->whereRaw('1 = 0');
-        }
-
-        return $query->whereHas('contracts.unit', fn (Builder $innerQuery) => $innerQuery->whereIn('property_floor_id', $floorIds));
+        return $this->scopeByAssignedPropertyIds($query, $user, 'property_id');
     }
 
     public function canAccessPropertyModel(User $user, Property $property): bool
@@ -204,18 +184,8 @@ class PropertyAssignmentAccessService
 
     public function canAccessCustomerModel(User $user, Customer $customer): bool
     {
-        if ($this->canBypassPropertyScope($user)) {
-            return true;
-        }
-
-        $ids = $this->assignedPropertyIds($user);
-        if ($ids === []) {
-            return false;
-        }
-
-        return $customer->contracts()
-            ->whereHas('unit.propertyFloor', fn (Builder $innerQuery) => $innerQuery->whereIn('property_id', $ids))
-            ->exists();
+        return $customer->property_id !== null
+            && $this->userCanAccessProperty($user, (int) $customer->property_id);
     }
 
     public function canAccessMaintenanceJobModel(User $user, MaintenanceJob $maintenanceJob): bool

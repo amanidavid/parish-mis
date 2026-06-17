@@ -50,4 +50,9 @@ class Property extends BaseModel
     {
         return $this->hasMany(StaffPropertyAssignment::class);
     }
+
+    public function customers(): HasMany
+    {
+        return $this->hasMany(Customer::class);
+    }
 }

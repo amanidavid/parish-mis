@@ -11,6 +11,10 @@ class CustomerResource extends ApiJsonResource
     {
         return [
             'uuid' => $this->uuid,
+            'property' => $this->whenLoaded('property', fn () => $this->property ? [
+                'uuid' => $this->property->uuid,
+                'name' => $this->property->name,
+            ] : null),
             'customer_type' => $this->customer_type,
             'display_name' => $this->display_name,
             'email' => $this->email,

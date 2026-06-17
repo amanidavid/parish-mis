@@ -13,9 +13,10 @@ class CustomerContractRuleService
     public const OPEN_ENDED_CONTRACT_END_DATE = '9999-12-31';
     public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active'];
 
-    public function findDuplicateCustomer(array $payload, ?int $ignoreCustomerId = null): ?Customer
+    public function findDuplicateCustomer(array $payload, int $propertyId, ?int $ignoreCustomerId = null): ?Customer
     {
         $query = Customer::query()
+            ->where('property_id', $propertyId)
             ->where('customer_type', $payload['customer_type']);
 
         if ($ignoreCustomerId) {

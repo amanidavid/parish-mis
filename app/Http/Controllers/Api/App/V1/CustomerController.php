@@ -26,8 +26,7 @@ class CustomerController extends Controller
     public function __construct(
         private CustomerContractRuleService $ruleService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
-    )
-    {
+    ) {
     }
 
     public function index(CustomerIndexRequest $request)
@@ -36,7 +35,9 @@ class CustomerController extends Controller
 
         $filters = $request->validated();
         $tenantUser = request()->user();
-        $query = Customer::query()->withCount('contracts');
+        $query = Customer::query()
+            ->with(['property'])
+            ->withCount('contracts');
 
         if ($tenantUser instanceof TenantUser) {
             $this->propertyAssignmentAccessService->scopeCustomers($query, $tenantUser);
@@ -57,7 +58,7 @@ class CustomerController extends Controller
                 return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
             }
 
-            $query->whereHas('contracts.unit.propertyFloor', fn ($innerQuery) => $innerQuery->where('property_id', $property->id));
+            $query->where('property_id', $property->id);
         }
 
         if (!empty($filters['customer_type'] ?? null)) {
@@ -73,7 +74,7 @@ class CustomerController extends Controller
         }
 
         if (!empty($filters['display_name'] ?? null)) {
-            $query->where('display_name', 'like', $filters['display_name'].'%');
+            $query->where('display_name', 'like', $filters['display_name'] . '%');
         }
 
         $this->applySort($query, $filters['sort'] ?? null, ['display_name', 'created_at'], 'display_name', 'asc');
@@ -87,13 +88,23 @@ class CustomerController extends Controller
         $this->authorize('create', Customer::class);
 
         $data = $request->validated();
-        $duplicateCustomer = $this->ruleService->findDuplicateCustomer($data);
-        if ($duplicateCustomer) {
-            return ApiResponse::error('Customer already exists', ['customer' => ['Duplicate customer record in this workspace']], 422);
+        $property = $this->resolveModelByUuid(Property::class, $data['property_uuid']);
+        if (!$property) {
+            return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
         }
 
-        $customer = DB::transaction(function () use ($data) {
+        if ($response = $this->ensureUserCanAccessProperty($property)) {
+            return $response;
+        }
+
+        $duplicateCustomer = $this->ruleService->findDuplicateCustomer($data, (int) $property->id);
+        if ($duplicateCustomer) {
+            return ApiResponse::error('Customer already exists', ['customer' => ['Duplicate customer record in the selected property']], 422);
+        }
+
+        $customer = DB::transaction(function () use ($data, $property) {
             $customer = Customer::query()->create([
+                'property_id' => $property->id,
                 'customer_type' => $data['customer_type'],
                 'display_name' => $this->normalizeDisplayName($data['display_name']) ?? '',
                 'email' => $this->normalizeEmail($data['email'] ?? null),
@@ -108,7 +119,7 @@ class CustomerController extends Controller
         });
 
         return ApiResponse::resource(
-            new CustomerResource($customer->load(['businessDetail'])->loadCount('contracts')),
+            new CustomerResource($customer->load(['property', 'businessDetail'])->loadCount('contracts')),
             ApiMessages::created('customer'),
             201
         );
@@ -119,7 +130,7 @@ class CustomerController extends Controller
         $this->authorize('view', $customer);
 
         return ApiResponse::resource(
-            new CustomerResource($customer->load(['businessDetail'])->loadCount('contracts')),
+            new CustomerResource($customer->load(['property', 'businessDetail'])->loadCount('contracts')),
             ApiMessages::detailsRetrieved('customer')
         );
     }
@@ -129,6 +140,27 @@ class CustomerController extends Controller
         $this->authorize('update', $customer);
 
         $data = $request->validated();
+        $property = $customer->property;
+
+        if (array_key_exists('property_uuid', $data)) {
+            $property = $this->resolveModelByUuid(Property::class, $data['property_uuid']);
+            if (!$property) {
+                return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
+            }
+
+            if ($response = $this->ensureUserCanAccessProperty($property)) {
+                return $response;
+            }
+
+            if ($customer->contracts()->exists() && (int) $property->id !== (int) $customer->property_id) {
+                return ApiResponse::error(
+                    'Customer property change is not allowed',
+                    ['property_uuid' => ['Customers with existing contracts cannot be moved to another property.']],
+                    422
+                );
+            }
+        }
+
         $duplicateCustomer = $this->ruleService->findDuplicateCustomer(array_merge([
             'customer_type' => $data['customer_type'] ?? $customer->customer_type,
             'display_name' => $data['display_name'] ?? $customer->display_name,
@@ -139,13 +171,14 @@ class CustomerController extends Controller
                 'registration_number' => $customer->businessDetail?->registration_number,
                 'tax_identifier' => $customer->businessDetail?->tax_identifier,
             ],
-        ], $data), $customer->id);
+        ], $data), (int) ($property?->id ?? $customer->property_id), $customer->id);
         if ($duplicateCustomer) {
-            return ApiResponse::error('Customer already exists', ['customer' => ['Duplicate customer record in this workspace']], 422);
+            return ApiResponse::error('Customer already exists', ['customer' => ['Duplicate customer record in the selected property']], 422);
         }
 
-        DB::transaction(function () use ($customer, $data) {
+        DB::transaction(function () use ($customer, $data, $property) {
             $customer->fill([
+                'property_id' => $property?->id ?? $customer->property_id,
                 'customer_type' => $data['customer_type'] ?? $customer->customer_type,
                 'display_name' => isset($data['display_name']) ? ($this->normalizeDisplayName($data['display_name']) ?? $customer->display_name) : $customer->display_name,
                 'email' => array_key_exists('email', $data) ? $this->normalizeEmail($data['email']) : $customer->email,
@@ -160,7 +193,7 @@ class CustomerController extends Controller
         });
 
         return ApiResponse::resource(
-            new CustomerResource($customer->fresh()->load(['businessDetail'])->loadCount('contracts')),
+            new CustomerResource($customer->fresh()->load(['property', 'businessDetail'])->loadCount('contracts')),
             ApiMessages::updated('customer')
         );
     }
@@ -172,6 +205,18 @@ class CustomerController extends Controller
         DB::transaction(fn () => $customer->delete());
 
         return ApiResponse::success(ApiMessages::deleted('customer'));
+    }
+
+    private function ensureUserCanAccessProperty(Property $property): ?\Illuminate\Http\JsonResponse
+    {
+        $tenantUser = request()->user();
+
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $property->id)) {
+            return ApiResponse::forbidden(['property' => ['You do not have access to the selected property.']]);
+        }
+
+        return null;
     }
 
     private function syncBusinessDetail(Customer $customer, ?array $businessDetail): void

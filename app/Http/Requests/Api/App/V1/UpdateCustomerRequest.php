@@ -15,6 +15,7 @@ class UpdateCustomerRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'property_uuid' => ['sometimes', 'uuid'],
             'customer_type' => ['sometimes', 'in:individual,business'],
             'display_name' => ['sometimes', 'string', 'min:2', 'max:150'],
             'email' => ['sometimes', 'nullable', 'email:rfc,dns', 'max:150'],

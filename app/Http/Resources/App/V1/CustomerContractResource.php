@@ -25,6 +25,7 @@ class CustomerContractResource extends ApiJsonResource
                 'uuid' => $this->customer->uuid,
                 'display_name' => $this->customer->display_name,
                 'customer_type' => $this->customer->customer_type,
+                'property_uuid' => $this->customer->property?->uuid,
             ]),
             'unit' => $this->whenLoaded('unit', fn () => [
                 'uuid' => $this->unit->uuid,

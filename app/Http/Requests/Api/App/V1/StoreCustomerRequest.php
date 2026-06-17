@@ -15,6 +15,7 @@ class StoreCustomerRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'property_uuid' => ['required', 'uuid'],
             'customer_type' => ['required', 'in:individual,business'],
             'display_name' => ['required', 'string', 'min:2', 'max:150'],
             'email' => ['nullable', 'email:rfc,dns', 'max:150'],

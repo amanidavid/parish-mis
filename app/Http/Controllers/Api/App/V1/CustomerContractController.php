@@ -15,8 +15,8 @@ use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertySubscriptionAccessService;
-use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
@@ -32,8 +32,7 @@ class CustomerContractController extends Controller
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private SubscriptionService $subscriptionService,
-    )
-    {
+    ) {
     }
 
     public function index(CustomerContractIndexRequest $request)
@@ -43,7 +42,7 @@ class CustomerContractController extends Controller
         $filters = $request->validated();
         $tenantUser = request()->user();
         $query = CustomerContract::query()
-            ->with(['customer', 'unit.propertyFloor.property'])
+            ->with(['customer.property', 'unit.propertyFloor.property'])
             ->withCount('documents');
 
         if ($tenantUser instanceof TenantUser) {
@@ -83,13 +82,13 @@ class CustomerContractController extends Controller
         if (!empty($filters['search'] ?? null)) {
             $query->where(function ($innerQuery) use ($filters) {
                 $innerQuery
-                    ->where('contract_number', 'like', $filters['search'].'%')
-                    ->orWhereHas('customer', fn ($customerQuery) => $customerQuery->where('display_name', 'like', $filters['search'].'%'));
+                    ->where('contract_number', 'like', $filters['search'] . '%')
+                    ->orWhereHas('customer', fn ($customerQuery) => $customerQuery->where('display_name', 'like', $filters['search'] . '%'));
             });
         }
 
         if (!empty($filters['contract_number'] ?? null)) {
-            $query->where('contract_number', 'like', $filters['contract_number'].'%');
+            $query->where('contract_number', 'like', $filters['contract_number'] . '%');
         }
 
         $this->applySort($query, $filters['sort'] ?? null, ['start_date', 'contract_number', 'created_at'], 'start_date', 'desc');
@@ -112,21 +111,17 @@ class CustomerContractController extends Controller
             return $error;
         }
 
-        $tenantUser = request()->user();
-        if ($tenantUser instanceof TenantUser
-            && !$this->propertyAssignmentAccessService->userCanAccessProperty(
-                $tenantUser,
-                (int) Unit::query()
-                    ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
-                    ->where('units.id', $unitId)
-                    ->value('property_floors.property_id')
-            )) {
-            return ApiResponse::forbidden(['unit' => ['You do not have access to the selected unit property.']]);
-        }
-
         $unit = Unit::query()->with('propertyFloor.property')->find($unitId);
         if (!$unit || !$unit->propertyFloor || !$unit->propertyFloor->property) {
             return ApiResponse::error('Unit property not found', ['unit_uuid' => ['The selected unit is not attached to a valid property.']], 422);
+        }
+
+        if ($response = $this->ensureUserCanAccessProperty($unit->propertyFloor->property)) {
+            return $response;
+        }
+
+        if ($response = $this->assertCustomerBelongsToUnitProperty($customer, $unit)) {
+            return $response;
         }
 
         if ($error = $this->assertPropertyAllowsContractOperations($unit->propertyFloor->property, $data['start_date'])) {
@@ -162,7 +157,7 @@ class CustomerContractController extends Controller
         });
 
         return ApiResponse::resource(
-            new CustomerContractResource($contract->load(['customer', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
+            new CustomerContractResource($contract->load(['customer.property', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
             ApiMessages::created('customer contract'),
             201
         );
@@ -173,7 +168,7 @@ class CustomerContractController extends Controller
         $this->authorize('view', $customerContract);
 
         return ApiResponse::resource(
-            new CustomerContractResource($customerContract->load(['customer', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
+            new CustomerContractResource($customerContract->load(['customer.property', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
             ApiMessages::detailsRetrieved('customer contract')
         );
     }
@@ -197,21 +192,17 @@ class CustomerContractController extends Controller
             }
         }
 
-        $tenantUser = request()->user();
-        if ($tenantUser instanceof TenantUser
-            && !$this->propertyAssignmentAccessService->userCanAccessProperty(
-                $tenantUser,
-                (int) Unit::query()
-                    ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
-                    ->where('units.id', $unitId)
-                    ->value('property_floors.property_id')
-            )) {
-            return ApiResponse::forbidden(['unit' => ['You do not have access to the selected unit property.']]);
-        }
-
         $unit = Unit::query()->with('propertyFloor.property')->find($unitId);
         if (!$unit || !$unit->propertyFloor || !$unit->propertyFloor->property) {
             return ApiResponse::error('Unit property not found', ['unit_uuid' => ['The selected unit is not attached to a valid property.']], 422);
+        }
+
+        if ($response = $this->ensureUserCanAccessProperty($unit->propertyFloor->property)) {
+            return $response;
+        }
+
+        if ($response = $this->assertCustomerBelongsToUnitProperty($customer, $unit)) {
+            return $response;
         }
 
         if (isset($data['contract_number'])) {
@@ -262,7 +253,7 @@ class CustomerContractController extends Controller
         });
 
         return ApiResponse::resource(
-            new CustomerContractResource($customerContract->fresh()->load(['customer', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
+            new CustomerContractResource($customerContract->fresh()->load(['customer.property', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
             ApiMessages::updated('customer contract')
         );
     }
@@ -275,6 +266,10 @@ class CustomerContractController extends Controller
 
         if (!$property) {
             return ApiResponse::error('Contract property not found', ['customer_contract' => ['The selected contract is not attached to a valid property.']], 422);
+        }
+
+        if ($response = $this->ensureUserCanAccessProperty($property)) {
+            return $response;
         }
 
         if ($error = $this->assertPropertyAllowsContractOperations($property)) {
@@ -314,6 +309,33 @@ class CustomerContractController extends Controller
         }
 
         return [$customer, $unitId, null];
+    }
+
+    private function ensureUserCanAccessProperty(Property $property): ?\Illuminate\Http\JsonResponse
+    {
+        $tenantUser = request()->user();
+
+        if ($tenantUser instanceof TenantUser
+            && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $property->id)) {
+            return ApiResponse::forbidden(['property' => ['You do not have access to the selected property.']]);
+        }
+
+        return null;
+    }
+
+    private function assertCustomerBelongsToUnitProperty(Customer $customer, Unit $unit): ?\Illuminate\Http\JsonResponse
+    {
+        $propertyId = $unit->propertyFloor?->property_id;
+
+        if ($propertyId === null || (int) $customer->property_id !== (int) $propertyId) {
+            return ApiResponse::error(
+                'Customer property mismatch',
+                ['customer_uuid' => ['The selected customer does not belong to the same property as the selected unit.']],
+                422
+            );
+        }
+
+        return null;
     }
 
     private function assertWorkspaceAllowsInventoryMutation(): void
