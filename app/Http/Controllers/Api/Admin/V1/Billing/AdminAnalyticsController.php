@@ -10,11 +10,17 @@ use App\Support\ApiResponse;
 
 class AdminAnalyticsController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private AdminAnalyticsService $adminAnalyticsService)
     {
     }
 
     /** Return collected revenue buckets for admin trend charts. */
+    /**
+     * Handle revenue trend.
+     */
     public function revenueTrend(AdminAnalyticsTrendRequest $request)
     {
         return ApiResponse::success(
@@ -24,6 +30,9 @@ class AdminAnalyticsController extends Controller
     }
 
     /** Return active, expired, and unsubscribed property subscription trend buckets. */
+    /**
+     * Handle subscription status trend.
+     */
     public function subscriptionStatusTrend(AdminAnalyticsTrendRequest $request)
     {
         return ApiResponse::success(
@@ -33,6 +42,9 @@ class AdminAnalyticsController extends Controller
     }
 
     /** Return property onboarding growth buckets for the admin dashboard. */
+    /**
+     * Handle property growth trend.
+     */
     public function propertyGrowthTrend(AdminAnalyticsTrendRequest $request)
     {
         return ApiResponse::success(
@@ -42,6 +54,9 @@ class AdminAnalyticsController extends Controller
     }
 
     /** Return the current subscription health split for composition charts. */
+    /**
+     * Handle subscription status split.
+     */
     public function subscriptionStatusSplit()
     {
         return ApiResponse::success(
@@ -51,6 +66,9 @@ class AdminAnalyticsController extends Controller
     }
 
     /** Return the highest-performing billing rules in the selected window. */
+    /**
+     * Handle top billing rules.
+     */
     public function topBillingRules(AdminTopBillingRulesRequest $request)
     {
         return ApiResponse::success(

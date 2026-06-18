@@ -8,6 +8,9 @@ use InvalidArgumentException;
 
 class BillingProrationService
 {
+    /**
+     * Handle calculate current cycle adjustment.
+     */
     public function calculateCurrentCycleAdjustment(
         ?CarbonInterface $periodStartsAt,
         ?CarbonInterface $periodEndsAt,
@@ -50,6 +53,9 @@ class BillingProrationService
         ];
     }
 
+    /**
+     * Handle empty adjustment.
+     */
     public function emptyAdjustment(): array
     {
         return [

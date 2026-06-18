@@ -14,11 +14,17 @@ use InvalidArgumentException;
 
 class TenantPropertySubscriptionPaymentController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertySubscriptionService $propertySubscriptionService,
     ) {
     }
 
+    /**
+     * Handle the preview request.
+     */
     public function preview(PreviewPropertySubscriptionPaymentRequest $request, Tenant $tenant)
     {
         try {
@@ -37,6 +43,9 @@ class TenantPropertySubscriptionPaymentController extends Controller
         );
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(TenantPropertySubscriptionPaymentIndexRequest $request, Tenant $tenant)
     {
         $payments = $this->propertySubscriptionService->listPayments($tenant, $request->validated());
@@ -47,6 +56,9 @@ class TenantPropertySubscriptionPaymentController extends Controller
         );
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StorePropertySubscriptionPaymentRequest $request, Tenant $tenant)
     {
         try {

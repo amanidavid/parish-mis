@@ -18,6 +18,9 @@ class StaffPropertyAssignmentController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Handle the index request.
+     */
     public function index(StaffPropertyAssignmentIndexRequest $request)
     {
         $this->authorize('viewAny', StaffPropertyAssignment::class);
@@ -57,6 +60,9 @@ class StaffPropertyAssignmentController extends Controller
         return ApiResponse::resource(StaffPropertyAssignmentResource::collection($assignments), 'Staff property assignments list');
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreStaffPropertyAssignmentRequest $request)
     {
         $this->authorize('create', StaffPropertyAssignment::class);
@@ -98,6 +104,9 @@ class StaffPropertyAssignmentController extends Controller
         );
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(StaffPropertyAssignment $staffPropertyAssignment)
     {
         $this->authorize('view', $staffPropertyAssignment);
@@ -108,6 +117,9 @@ class StaffPropertyAssignmentController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateStaffPropertyAssignmentRequest $request, StaffPropertyAssignment $staffPropertyAssignment)
     {
         $this->authorize('update', $staffPropertyAssignment);
@@ -155,6 +167,9 @@ class StaffPropertyAssignmentController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(StaffPropertyAssignment $staffPropertyAssignment)
     {
         $this->authorize('delete', $staffPropertyAssignment);

@@ -16,10 +16,16 @@ use App\Support\ApiResponse;
 
 class ContractReportController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private ContractReportService $contractReportService)
     {
     }
 
+    /**
+     * Handle the summary request.
+     */
     public function summary(ContractReportSummaryRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -33,6 +39,9 @@ class ContractReportController extends Controller
         );
     }
 
+    /**
+     * Handle the by property request.
+     */
     public function byProperty(ContractReportByPropertyRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -62,6 +71,9 @@ class ContractReportController extends Controller
         ]);
     }
 
+    /**
+     * Handle the chart request.
+     */
     public function chart(ContractReportChartRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -79,6 +91,9 @@ class ContractReportController extends Controller
         ]);
     }
 
+    /**
+     * Handle the expiring request.
+     */
     public function expiring(ContractReportExpiringRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -108,6 +123,9 @@ class ContractReportController extends Controller
         ]);
     }
 
+    /**
+     * Resolve tenant user.
+     */
     private function resolveTenantUser(): TenantUser|\Illuminate\Http\JsonResponse
     {
         $tenantUser = request()->user();

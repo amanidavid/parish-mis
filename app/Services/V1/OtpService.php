@@ -12,11 +12,17 @@ use Throwable;
 
 class OtpService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SmsService $smsService,
     ) {
     }
 
+    /**
+     * Create .
+     */
     public function create(int $userId, string $purpose = 'login', ?string $channel = null): array
     {
         $length = (int) config('otp.length', 6);
@@ -58,6 +64,9 @@ class OtpService
         return $result;
     }
 
+    /**
+     * Handle verify.
+     */
     public function verify(string $challengeUuid, string $code, string $purpose = 'login'): bool
     {
         return DB::connection('base')->transaction(function () use ($challengeUuid, $code, $purpose) {
@@ -88,6 +97,9 @@ class OtpService
         });
     }
 
+    /**
+     * Generate code.
+     */
     private function generateCode(int $length = 6): string
     {
         $min = (int) pow(10, $length - 1);
@@ -95,6 +107,9 @@ class OtpService
         return (string) random_int($min, $max);
     }
 
+    /**
+     * Determine whether hash code.
+     */
     private function hashCode(string $code): string
     {
         $secret = (string) (config('app.key') ?? 'secret');
@@ -105,6 +120,9 @@ class OtpService
         return hash('sha256', $code.'|'.$secret);
     }
 
+    /**
+     * Resolve channel.
+     */
     private function resolveChannel(?string $channel): string
     {
         $channel = trim((string) $channel);
@@ -126,6 +144,9 @@ class OtpService
         return $configured !== '' ? $configured : 'log';
     }
 
+    /**
+     * Deliver code.
+     */
     private function deliverCode(OtpToken $token, string $code, int $ttl): void
     {
         if ($token->channel === 'log') {

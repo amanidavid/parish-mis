@@ -11,11 +11,17 @@ use App\Support\ApiResponse;
 
 class DashboardReportController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private DashboardReportService $dashboardReportService)
     {
     }
 
     /** Return the first-login dashboard dataset with summary cards and paginated property occupancy metrics. */
+    /**
+     * Handle the overview request.
+     */
     public function overview(DashboardOverviewRequest $request)
     {
         $tenantUser = request()->user();

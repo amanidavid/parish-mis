@@ -12,12 +12,18 @@ use InvalidArgumentException;
 
 class PropertySubscriptionAccessService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private SubscriptionService $subscriptionService,
     ) {
     }
 
+    /**
+     * Assert property allows operational mutation.
+     */
     public function assertPropertyAllowsOperationalMutation(Tenant $tenant, Property $property, string $moduleName = 'property operations'): void
     {
         $workspaceProperty = $this->workspacePropertyRegistryService->resolveWorkspacePropertyForModel($tenant, $property);
@@ -40,6 +46,9 @@ class PropertySubscriptionAccessService
         }
     }
 
+    /**
+     * Assert contract start date covered.
+     */
     public function assertContractStartDateCovered(Tenant $tenant, Property $property, CarbonInterface|string $contractStartDate): void
     {
         $workspaceProperty = $this->workspacePropertyRegistryService->resolveWorkspacePropertyForModel($tenant, $property);
@@ -62,6 +71,9 @@ class PropertySubscriptionAccessService
         }
     }
 
+    /**
+     * Handle active workspace trial ends on.
+     */
     public function activeWorkspaceTrialEndsOn(Tenant $tenant, CarbonInterface|string|null $date = null): ?Carbon
     {
         $subscription = $this->subscriptionService->currentSubscription($tenant);
@@ -83,6 +95,9 @@ class PropertySubscriptionAccessService
         return $trialEndsOn->gte($targetDate) ? $trialEndsOn : null;
     }
 
+    /**
+     * Workspace trial covers date.
+     */
     private function workspaceTrialCoversDate(Tenant $tenant, CarbonInterface|string $date): bool
     {
         return $this->activeWorkspaceTrialEndsOn($tenant, $date) !== null;

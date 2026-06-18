@@ -11,6 +11,9 @@ class TenantAdminInsightService
 {
     private const MAX_PER_PAGE = 100;
 
+    /**
+     * Handle operational summary.
+     */
     public function operationalSummary(): array
     {
         $propertyTotals = $this->tenantTable('properties')
@@ -91,6 +94,9 @@ class TenantAdminInsightService
         ];
     }
 
+    /**
+     * Handle property location summary.
+     */
     public function propertyLocationSummary(array $filters = []): array
     {
         $propertiesCount = $this->propertiesLocationQuery($filters)->count('properties.id');
@@ -230,6 +236,9 @@ class TenantAdminInsightService
         ];
     }
 
+    /**
+     * Handle property location breakdown.
+     */
     public function propertyLocationBreakdown(array $filters = []): array
     {
         $groupBy = (string) ($filters['group_by'] ?? 'country');
@@ -272,6 +281,9 @@ class TenantAdminInsightService
         ];
     }
 
+    /**
+     * Handle property overview.
+     */
     public function propertyOverview(array $filters = []): LengthAwarePaginator
     {
         $floorTotals = $this->tenantTable('property_floors')
@@ -350,6 +362,9 @@ class TenantAdminInsightService
         return $query->paginate($perPage)->withQueryString();
     }
 
+    /**
+     * Handle contracts summary.
+     */
     public function contractsSummary(array $filters = []): array
     {
         $query = $this->tenantTable('customer_contracts')
@@ -452,6 +467,9 @@ class TenantAdminInsightService
         ];
     }
 
+    /**
+     * Handle staff summary.
+     */
     public function staffSummary(): array
     {
         $row = $this->tenantTable('users')
@@ -467,6 +485,9 @@ class TenantAdminInsightService
         ];
     }
 
+    /**
+     * Properties location query.
+     */
     private function propertiesLocationQuery(array $filters = []): QueryBuilder
     {
         $query = $this->tenantTable('properties')
@@ -490,6 +511,9 @@ class TenantAdminInsightService
         return $query;
     }
 
+    /**
+     * Apply property overview sort.
+     */
     private function applyPropertyOverviewSort(QueryBuilder $query, ?string $sort): void
     {
         $sort = trim((string) $sort);
@@ -510,6 +534,9 @@ class TenantAdminInsightService
         };
     }
 
+    /**
+     * Property location breakdown config.
+     */
     private function propertyLocationBreakdownConfig(string $groupBy): array
     {
         return match ($groupBy) {
@@ -611,6 +638,9 @@ class TenantAdminInsightService
         };
     }
 
+    /**
+     * Apply property location breakdown sort.
+     */
     private function applyPropertyLocationBreakdownSort(QueryBuilder $query, string $nameColumn, ?string $sort): void
     {
         $sort = trim((string) $sort);
@@ -624,11 +654,17 @@ class TenantAdminInsightService
         };
     }
 
+    /**
+     * Tenant table.
+     */
     private function tenantTable(string $table): QueryBuilder
     {
         return DB::connection($this->tenantConnectionName())->table($table);
     }
 
+    /**
+     * Tenant connection name.
+     */
     private function tenantConnectionName(): string
     {
         return (string) config('multitenancy.tenant_database_connection_name', 'tenant');

@@ -14,11 +14,17 @@ use InvalidArgumentException;
 
 class WorkspacePropertyRegistryService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private TenantConnectionManager $tenantConnectionManager,
     ) {
     }
 
+    /**
+     * Handle ensure tenant synced.
+     */
     public function ensureTenantSynced(Tenant $tenant): void
     {
         if (!WorkspaceProperty::query()->where('tenant_id', $tenant->id)->exists()) {
@@ -26,11 +32,17 @@ class WorkspacePropertyRegistryService
         }
     }
 
+    /**
+     * Sync all properties.
+     */
     public function syncAllProperties(Tenant $tenant): Collection
     {
         return $this->syncProperties($tenant);
     }
 
+    /**
+     * Sync property ids.
+     */
     public function syncPropertyIds(Tenant $tenant, array $propertyIds): Collection
     {
         $propertyIds = array_values(array_unique(array_filter(array_map('intval', $propertyIds))));
@@ -42,6 +54,9 @@ class WorkspacePropertyRegistryService
         return $this->syncProperties($tenant, $propertyIds);
     }
 
+    /**
+     * Sync property uuid.
+     */
     public function syncPropertyUuid(Tenant $tenant, string $propertyUuid): ?WorkspaceProperty
     {
         $propertyUuid = trim($propertyUuid);
@@ -53,6 +68,9 @@ class WorkspacePropertyRegistryService
         return $this->syncProperties($tenant, null, [$propertyUuid])->first();
     }
 
+    /**
+     * Resolve workspace property.
+     */
     public function resolveWorkspaceProperty(Tenant $tenant, string $propertyUuid): ?WorkspaceProperty
     {
         $workspaceProperty = WorkspaceProperty::query()
@@ -72,6 +90,9 @@ class WorkspacePropertyRegistryService
         return $this->syncPropertyUuid($tenant, $propertyUuid);
     }
 
+    /**
+     * Resolve workspace property for model.
+     */
     public function resolveWorkspacePropertyForModel(Tenant $tenant, Property $property): ?WorkspaceProperty
     {
         $workspaceProperty = WorkspaceProperty::query()
@@ -91,6 +112,9 @@ class WorkspacePropertyRegistryService
         return $this->syncPropertyIds($tenant, [$property->id])->first();
     }
 
+    /**
+     * Handle mark property deleted.
+     */
     public function markPropertyDeleted(Tenant $tenant, string $propertyUuid): void
     {
         WorkspaceProperty::query()
@@ -104,6 +128,9 @@ class WorkspacePropertyRegistryService
             ]);
     }
 
+    /**
+     * Sync ready tenants.
+     */
     public function syncReadyTenants(?string $tenantUuid = null, int $chunk = 20, ?callable $progress = null): void
     {
         $chunk = max($chunk, 1);
@@ -126,6 +153,9 @@ class WorkspacePropertyRegistryService
         });
     }
 
+    /**
+     * Sync tenant with progress.
+     */
     private function syncTenantWithProgress(Tenant $tenant, ?callable $progress = null): void
     {
         try {
@@ -140,6 +170,9 @@ class WorkspacePropertyRegistryService
         }
     }
 
+    /**
+     * Sync properties.
+     */
     private function syncProperties(Tenant $tenant, ?array $propertyIds = null, ?array $propertyUuids = null): Collection
     {
         $this->assertTenantReady($tenant);
@@ -241,6 +274,9 @@ class WorkspacePropertyRegistryService
             ->get();
     }
 
+    /**
+     * Run in tenant context.
+     */
     private function runInTenantContext(Tenant $tenant, callable $callback): mixed
     {
         $currentTenant = Tenant::current();
@@ -253,6 +289,9 @@ class WorkspacePropertyRegistryService
         }
     }
 
+    /**
+     * Assert tenant ready.
+     */
     private function assertTenantReady(Tenant $tenant): void
     {
         if ($tenant->provisioning_status !== 'ready' || empty($tenant->database)) {
@@ -260,6 +299,9 @@ class WorkspacePropertyRegistryService
         }
     }
 
+    /**
+     * Format date time.
+     */
     private function formatDateTime(mixed $value): ?string
     {
         if ($value === null || $value === '') {

@@ -28,6 +28,9 @@ class MaintenanceJobController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private MaintenanceHierarchyService $maintenanceHierarchyService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
@@ -36,6 +39,9 @@ class MaintenanceJobController extends Controller
     ) {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(MaintenanceJobIndexRequest $request)
     {
         $this->authorize('viewAny', MaintenanceJob::class);
@@ -100,6 +106,9 @@ class MaintenanceJobController extends Controller
         return ApiResponse::resource(MaintenanceJobResource::collection($jobs), ApiMessages::listRetrieved('maintenance_jobs'));
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreMaintenanceJobRequest $request)
     {
         $this->authorize('create', MaintenanceJob::class);
@@ -142,6 +151,9 @@ class MaintenanceJobController extends Controller
         );
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(MaintenanceJob $maintenanceJob)
     {
         $this->authorize('view', $maintenanceJob);
@@ -152,6 +164,9 @@ class MaintenanceJobController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateMaintenanceJobRequest $request, MaintenanceJob $maintenanceJob)
     {
         $this->authorize('update', $maintenanceJob);
@@ -192,6 +207,9 @@ class MaintenanceJobController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(MaintenanceJob $maintenanceJob)
     {
         $this->authorize('delete', $maintenanceJob);
@@ -207,6 +225,9 @@ class MaintenanceJobController extends Controller
         return ApiResponse::success(ApiMessages::deleted('maintenance_job'));
     }
 
+    /**
+     * Reload maintenance job.
+     */
     private function reloadMaintenanceJob(MaintenanceJob $maintenanceJob, bool $includeExpenses = false): MaintenanceJob
     {
         $query = MaintenanceJob::query()
@@ -231,6 +252,9 @@ class MaintenanceJobController extends Controller
         return $query->findOrFail($maintenanceJob->id);
     }
 
+    /**
+     * Normalize title.
+     */
     private function normalizeTitle(string $value): string
     {
         $normalized = Str::of($value)->trim()->squish()->ucfirst()->toString();
@@ -238,6 +262,9 @@ class MaintenanceJobController extends Controller
         return $normalized;
     }
 
+    /**
+     * Normalize description.
+     */
     private function normalizeDescription(?string $value): ?string
     {
         $normalized = Str::of((string) $value)->trim()->squish()->toString();
@@ -245,6 +272,9 @@ class MaintenanceJobController extends Controller
         return $normalized !== '' ? $normalized : null;
     }
 
+    /**
+     * Assert workspace allows inventory mutation.
+     */
     private function assertWorkspaceAllowsInventoryMutation(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -254,6 +284,9 @@ class MaintenanceJobController extends Controller
         }
     }
 
+    /**
+     * Assert property allows maintenance.
+     */
     private function assertPropertyAllowsMaintenance(Property $property): ?\Illuminate\Http\JsonResponse
     {
         $tenant = request()->attributes->get('tenant');

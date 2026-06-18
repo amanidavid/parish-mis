@@ -9,11 +9,17 @@ class JwtService
     public const APP_TOKEN_CONTEXT = 'app';
     public const ADMIN_TOKEN_CONTEXT = 'admin';
 
+    /**
+     * Now.
+     */
     private function now(): int
     {
         return time();
     }
 
+    /**
+     * Token ttl seconds.
+     */
     private function tokenTtlSeconds(string $context = self::APP_TOKEN_CONTEXT): int
     {
         $configKey = $context === self::ADMIN_TOKEN_CONTEXT ? 'JWT_ADMIN_TTL' : 'JWT_TTL';
@@ -22,6 +28,9 @@ class JwtService
         return max($ttl, 60);
     }
 
+    /**
+     * Jwt secret.
+     */
     private function jwtSecret(): string
     {
         $secret = (string) (config('app.key') ?? '');
@@ -36,11 +45,17 @@ class JwtService
         return $secret;
     }
 
+    /**
+     * Base64 url encode.
+     */
     private function base64UrlEncode(string $data): string
     {
         return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
     }
 
+    /**
+     * Base64 url decode.
+     */
     private function base64UrlDecode(string $data): string
     {
         $remainder = strlen($data) % 4;
@@ -51,11 +66,17 @@ class JwtService
         return base64_decode(strtr($data, '-_', '+/')) ?: '';
     }
 
+    /**
+     * Sign.
+     */
     private function sign(string $headerPayload, string $secret): string
     {
         return $this->base64UrlEncode(hash_hmac('sha256', $headerPayload, $secret, true));
     }
 
+    /**
+     * Determine whether sue token for subject.
+     */
     public function issueTokenForSubject(string $subjectUuid, ?int $ttlSeconds = null): array
     {
         $now = $this->now();
@@ -77,6 +98,9 @@ class JwtService
         return [$jwt, $payload['exp'] - $now];
     }
 
+    /**
+     * Determine whether sue token for model.
+     */
     public function issueTokenForModel(object $user, ?int $ttlSeconds = null): array
     {
         $now = $this->now();
@@ -98,6 +122,9 @@ class JwtService
         return [$jwt, $payload['exp'] - $now];
     }
 
+    /**
+     * Handle decode token.
+     */
     public function decodeToken(string $jwt, bool $ignoreExpiration = false): array
     {
         $parts = explode('.', $jwt);
@@ -123,11 +150,17 @@ class JwtService
         return $payload;
     }
 
+    /**
+     * Determine whether sue admin token for subject.
+     */
     public function issueAdminTokenForSubject(string $subjectUuid): array
     {
         return $this->issueTokenForSubject($subjectUuid, $this->tokenTtlSeconds(self::ADMIN_TOKEN_CONTEXT));
     }
 
+    /**
+     * Determine whether sue admin token for model.
+     */
     public function issueAdminTokenForModel(object $user): array
     {
         return $this->issueTokenForModel($user, $this->tokenTtlSeconds(self::ADMIN_TOKEN_CONTEXT));

@@ -14,11 +14,17 @@ use InvalidArgumentException;
 
 class AutomationTaskController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertySubscriptionAutomationService $propertySubscriptionAutomationService,
     ) {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index()
     {
         return ApiResponse::resource(
@@ -27,6 +33,9 @@ class AutomationTaskController extends Controller
         );
     }
 
+    /**
+     * Handle runs.
+     */
     public function runs(AutomationTaskRunIndexRequest $request, AutomationTaskSetting $automationTaskSetting)
     {
         return ApiResponse::resource(
@@ -40,6 +49,9 @@ class AutomationTaskController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateAutomationTaskSettingRequest $request, AutomationTaskSetting $automationTaskSetting)
     {
         try {
@@ -62,6 +74,9 @@ class AutomationTaskController extends Controller
         );
     }
 
+    /**
+     * Handle the run now request.
+     */
     public function runNow(AutomationTaskSetting $automationTaskSetting)
     {
         try {

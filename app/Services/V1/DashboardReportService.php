@@ -11,6 +11,9 @@ class DashboardReportService
 {
     private const MAX_PER_PAGE = 100;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     )
@@ -18,6 +21,9 @@ class DashboardReportService
     }
 
     /** Build the tenant dashboard dataset with compact summary cards and paginated property analytics. */
+    /**
+     * Handle the overview request.
+     */
     public function overview(User $tenantUser, array $filters = []): array
     {
         $scope = $this->resolveScope($tenantUser);
@@ -29,6 +35,9 @@ class DashboardReportService
     }
 
     /** Return the top-level dashboard counts using grouped queries instead of repeated row-by-row loops. */
+    /**
+     * Handle the summary request.
+     */
     private function summary(array $scope): array
     {
         $totalProperties = $this->propertiesBaseQuery($scope)->count();
@@ -56,6 +65,9 @@ class DashboardReportService
     }
 
     /** Return the property table shown under the cards using aggregated subqueries and server-side pagination. */
+    /**
+     * Property breakdown.
+     */
     private function propertyBreakdown(array $filters, array $scope): LengthAwarePaginator
     {
         $query = $this->propertiesBaseQuery($scope)
@@ -102,6 +114,9 @@ class DashboardReportService
     }
 
     /** Aggregate units by property so occupancy cards and table rows come from one indexed pass. */
+    /**
+     * Unit aggregate subquery.
+     */
     private function unitAggregateSubquery(array $scope): QueryBuilder
     {
         $query = $this->tenantTable('property_floors')
@@ -117,6 +132,9 @@ class DashboardReportService
     }
 
     /** Aggregate contract statuses by property so the dashboard can compare contract health side by side. */
+    /**
+     * Contract aggregate subquery.
+     */
     private function contractAggregateSubquery(array $scope): QueryBuilder
     {
         $query = $this->tenantTable('property_floors')
@@ -135,12 +153,18 @@ class DashboardReportService
     }
 
     /** Build the base property query and apply staff-assignment scope only once. */
+    /**
+     * Properties base query.
+     */
     private function propertiesBaseQuery(array $scope): QueryBuilder
     {
         return $this->applyPropertyScopeToColumn($this->tenantTable('properties'), $scope, 'properties.id');
     }
 
     /** Build the base units query so summary counts can reuse the same scope and joins. */
+    /**
+     * Units base query.
+     */
     private function unitsBaseQuery(array $scope): QueryBuilder
     {
         $query = $this->tenantTable('units')
@@ -150,6 +174,9 @@ class DashboardReportService
     }
 
     /** Build the base contracts query so customer and contract counts stay aligned to the same property scope. */
+    /**
+     * Contracts base query.
+     */
     private function contractsBaseQuery(array $scope): QueryBuilder
     {
         $query = $this->tenantTable('customer_contracts')
@@ -160,6 +187,9 @@ class DashboardReportService
     }
 
     /** Resolve dashboard scope once so every downstream query shares the same property-access rules. */
+    /**
+     * Resolve scope.
+     */
     private function resolveScope(User $tenantUser): array
     {
         return [
@@ -169,6 +199,9 @@ class DashboardReportService
     }
 
     /** Keep sorting explicit and index-friendly for the property table. */
+    /**
+     * Apply breakdown sort.
+     */
     private function applyBreakdownSort(QueryBuilder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -187,6 +220,9 @@ class DashboardReportService
     }
 
     /** Keep staff property scope inside SQL so the database can use assignment indexes directly. */
+    /**
+     * Apply property scope to column.
+     */
     private function applyPropertyScopeToColumn(QueryBuilder $query, array $scope, string $propertyColumn): QueryBuilder
     {
         if ($scope['bypass'] === true) {
@@ -201,11 +237,17 @@ class DashboardReportService
         });
     }
 
+    /**
+     * Tenant table.
+     */
     private function tenantTable(string $table): QueryBuilder
     {
         return DB::connection($this->tenantConnectionName())->table($table);
     }
 
+    /**
+     * Tenant connection name.
+     */
     private function tenantConnectionName(): string
     {
         return (string) config('multitenancy.tenant_database_connection_name', 'tenant');

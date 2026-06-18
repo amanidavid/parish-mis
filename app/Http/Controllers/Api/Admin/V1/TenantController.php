@@ -39,6 +39,9 @@ class TenantController extends Controller
 {
     use InteractsWithTenantAdminModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private TenantAdminInsightService $tenantAdminInsightService,
@@ -50,6 +53,9 @@ class TenantController extends Controller
     }
 
     /** List workspaces for the admin area with lightweight filters for operational search. */
+    /**
+     * Handle the index request.
+     */
     public function index(TenantIndexRequest $request)
     {
         $filters = $request->validated();
@@ -93,12 +99,18 @@ class TenantController extends Controller
     }
 
     /** Return one workspace record for admin detail screens. */
+    /**
+     * Handle the show request.
+     */
     public function show(Tenant $tenant)
     {
         return ApiResponse::resource(new TenantResource($tenant), 'Tenant details');
     }
 
     /** List staff inside a specific workspace so admin users can inspect tenant membership. */
+    /**
+     * Handle staff.
+     */
     public function staff(TenantStaffIndexRequest $request, Tenant $tenant)
     {
         $tenantUsers = $this->runInTenantContext($tenant, function () use ($request) {
@@ -137,6 +149,9 @@ class TenantController extends Controller
     }
 
     /** Create a new workspace from the admin side and queue provisioning of its tenant database. */
+    /**
+     * Handle the store request.
+     */
     public function store(TenantStoreRequest $request)
     {
         $data = $request->validated();
@@ -170,6 +185,9 @@ class TenantController extends Controller
     }
 
     /** Retry workspace provisioning when the original async setup did not complete successfully. */
+    /**
+     * Handle the retry provisioning request.
+     */
     public function retryProvisioning(Tenant $tenant)
     {
         if ($tenant->provisioning_status === 'provisioning') {
@@ -192,6 +210,9 @@ class TenantController extends Controller
     }
 
     /** Return the current subscription summary and apply any due scheduled billing profile change first. */
+    /**
+     * Handle the subscription request.
+     */
     public function subscription(Tenant $tenant)
     {
         $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
@@ -203,6 +224,9 @@ class TenantController extends Controller
     }
 
     /** Return the paginated property-level billing estimate breakdown for one workspace. */
+    /**
+     * Handle subscription properties.
+     */
     public function subscriptionProperties(TenantSubscriptionPropertyIndexRequest $request, Tenant $tenant)
     {
         $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
@@ -219,6 +243,9 @@ class TenantController extends Controller
     }
 
     /** Return the core operational counts that describe how a workspace is being used right now. */
+    /**
+     * Handle operational summary.
+     */
     public function operationalSummary(Tenant $tenant)
     {
         $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
@@ -246,6 +273,9 @@ class TenantController extends Controller
     }
 
     /** Return grouped property totals across country, region, district, and ward for one workspace. */
+    /**
+     * Handle property location summary.
+     */
     public function propertyLocationSummary(TenantPropertyLocationSummaryRequest $request, Tenant $tenant)
     {
         $summary = $this->runInTenantContext(
@@ -257,6 +287,9 @@ class TenantController extends Controller
     }
 
     /** Return one paginated location level so admin screens can drill into countries, regions, districts, or wards. */
+    /**
+     * Handle property location breakdown.
+     */
     public function propertyLocationBreakdown(TenantPropertyLocationBreakdownRequest $request, Tenant $tenant)
     {
         $breakdown = $this->runInTenantContext(
@@ -290,6 +323,9 @@ class TenantController extends Controller
     }
 
     /** Return paginated properties with operational rollups for admin workspace inspection screens. */
+    /**
+     * Handle properties.
+     */
     public function properties(TenantPropertyOverviewRequest $request, Tenant $tenant)
     {
         $properties = $this->runInTenantContext(
@@ -318,6 +354,9 @@ class TenantController extends Controller
     }
 
     /** Return contract totals and status breakdowns for admin workspace monitoring. */
+    /**
+     * Handle contracts summary.
+     */
     public function contractsSummary(TenantContractsSummaryRequest $request, Tenant $tenant)
     {
         $summary = $this->runInTenantContext(
@@ -329,6 +368,9 @@ class TenantController extends Controller
     }
 
     /** Return a compact staff status summary without loading individual members. */
+    /**
+     * Handle staff summary.
+     */
     public function staffSummary(Tenant $tenant)
     {
         $summary = $this->runInTenantContext(
@@ -340,6 +382,9 @@ class TenantController extends Controller
     }
 
     /** Return the effective workspace access state after billing and status rules are applied. */
+    /**
+     * Handle access state.
+     */
     public function accessState(Tenant $tenant)
     {
         $this->subscriptionBillingProfileChangeService->applyDuePendingChangeIfNeeded($tenant);
@@ -357,6 +402,9 @@ class TenantController extends Controller
     }
 
     /** Suspend or reactivate a workspace at the tenant record level. */
+    /**
+     * Update status.
+     */
     public function updateStatus(TenantStatusUpdateRequest $request, Tenant $tenant)
     {
         $tenant->status = $request->validated('status');
@@ -366,6 +414,9 @@ class TenantController extends Controller
     }
 
     /** Change lifecycle status of the current workspace subscription such as trialing, active, or canceled. */
+    /**
+     * Update subscription status.
+     */
     public function updateSubscriptionStatus(TenantSubscriptionStatusUpdateRequest $request, Tenant $tenant)
     {
         $subscription = $this->subscriptionService->updateSubscriptionStatus($tenant, $request->validated());
@@ -385,6 +436,9 @@ class TenantController extends Controller
     }
 
     /** Preview billing profile impact so admins can review pricing and proration before applying a change. */
+    /**
+     * Handle preview billing profile change.
+     */
     public function previewBillingProfileChange(AssignTenantBillingProfileRequest $request, Tenant $tenant)
     {
         $profile = BillingProfile::query()->where('uuid', $request->validated('billing_profile_uuid'))->first();
@@ -411,6 +465,9 @@ class TenantController extends Controller
     }
 
     /** Apply a billing profile change immediately or schedule it for the next billing cycle. */
+    /**
+     * Handle assign billing profile.
+     */
     public function assignBillingProfile(AssignTenantBillingProfileRequest $request, Tenant $tenant)
     {
         $profile = BillingProfile::query()->where('uuid', $request->validated('billing_profile_uuid'))->first();
@@ -439,6 +496,9 @@ class TenantController extends Controller
         );
     }
 
+    /**
+     * Map workspace creation error.
+     */
     private function mapWorkspaceCreationError(string $message): array
     {
         return match ($message) {
@@ -454,6 +514,9 @@ class TenantController extends Controller
         };
     }
 
+    /**
+     * Apply workspace search.
+     */
     private function applyWorkspaceSearch(Builder $query, ?string $search): void
     {
         $search = trim((string) $search);
@@ -481,6 +544,9 @@ class TenantController extends Controller
         });
     }
 
+    /**
+     * Apply workspace display name prefix filter.
+     */
     private function applyWorkspaceDisplayNamePrefixFilter(Builder $query, ?string $displayName): void
     {
         $displayName = trim((string) $displayName);
@@ -500,6 +566,9 @@ class TenantController extends Controller
         ]);
     }
 
+    /**
+     * Uses postgres case sensitive like.
+     */
     private function usesPostgresCaseSensitiveLike(Builder $query): bool
     {
         return $query->getModel()->getConnection()->getDriverName() === 'pgsql';

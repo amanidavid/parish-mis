@@ -30,6 +30,9 @@ use RuntimeException;
 
 class AuthController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private JwtService $jwt,
         private OtpService $otp,
@@ -40,6 +43,9 @@ class AuthController extends Controller
     {
     }
 
+    /**
+     * Handle the register request.
+     */
     public function register(RegisterRequest $request)
     {
         $data = $request->validated();
@@ -102,6 +108,9 @@ class AuthController extends Controller
         );
     }
 
+    /**
+     * Handle the login request.
+     */
     public function login(LoginRequest $request)
     {
         $data = $request->validated();
@@ -126,6 +135,9 @@ class AuthController extends Controller
         );
     }
 
+    /**
+     * Handle the verify otp request.
+     */
     public function verifyOtp(VerifyOtpRequest $request)
     {
         $data = $request->validated();
@@ -150,6 +162,9 @@ class AuthController extends Controller
         );
     }
 
+    /**
+     * Handle the forgot password request.
+     */
     public function forgotPassword(ForgotPasswordRequest $request)
     {
         $data = $request->validated();
@@ -179,6 +194,9 @@ class AuthController extends Controller
         );
     }
 
+    /**
+     * Handle the reset password request.
+     */
     public function resetPassword(ResetPasswordRequest $request)
     {
         $data = $request->validated();
@@ -195,6 +213,9 @@ class AuthController extends Controller
         return ApiResponse::success('Password reset successful');
     }
 
+    /**
+     * Handle the me request.
+     */
     public function me()
     {
         $baseUser = request()->attributes->get('base_user');
@@ -217,6 +238,9 @@ class AuthController extends Controller
         ]), 'Current user');
     }
 
+    /**
+     * Handle the refresh request.
+     */
     public function refresh()
     {
         $baseUser = request()->attributes->get('base_user') ?? request()->attributes->get('auth_user');
@@ -238,11 +262,17 @@ class AuthController extends Controller
         );
     }
 
+    /**
+     * Handle the logout request.
+     */
     public function logout()
     {
         return ApiResponse::success('Logged out');
     }
 
+    /**
+     * Handle the change password request.
+     */
     public function changePassword(ChangePasswordRequest $request)
     {
         $baseUser = request()->attributes->get('base_user') ?? request()->attributes->get('auth_user');
@@ -269,6 +299,9 @@ class AuthController extends Controller
         return ApiResponse::success('Password changed successfully.');
     }
 
+    /**
+     * Tenant memberships.
+     */
     private function tenantMemberships(int $baseUserId)
     {
         return DB::connection('base')->table('user_tenants')
@@ -284,6 +317,9 @@ class AuthController extends Controller
             ->get();
     }
 
+    /**
+     * Resolve base user for credential.
+     */
     private function resolveBaseUserForCredential(array $data, bool $failOnAmbiguous = true): ?BaseUser
     {
         $phone = !empty($data['phone'] ?? null)
@@ -316,6 +352,9 @@ class AuthController extends Controller
         return $membershipCount === 1 ? $user : null;
     }
 
+    /**
+     * Throw single account required.
+     */
     private function throwSingleAccountRequired(): never
     {
         throw new HttpResponseException(ApiResponse::error(
@@ -325,6 +364,9 @@ class AuthController extends Controller
         ));
     }
 
+    /**
+     * Throw single workspace required.
+     */
     private function throwSingleWorkspaceRequired(): never
     {
         throw new HttpResponseException(ApiResponse::error(
@@ -334,6 +376,9 @@ class AuthController extends Controller
         ));
     }
 
+    /**
+     * Resolve registration username.
+     */
     private function resolveRegistrationUsername(?string $username, string $name, string $phone): string
     {
         $username = $this->normalizeUsername($username);
@@ -364,6 +409,9 @@ class AuthController extends Controller
         return $candidate;
     }
 
+    /**
+     * Compose phone number.
+     */
     private function composePhoneNumber(?string $countryCode, ?string $phone): string
     {
         $normalizedCountryCode = $this->normalizeCountryCode($countryCode);
@@ -373,6 +421,9 @@ class AuthController extends Controller
         return $normalizedCountryCode.($normalizedPhone !== '' ? $normalizedPhone : '');
     }
 
+    /**
+     * Normalize country code.
+     */
     private function normalizeCountryCode(?string $countryCode): string
     {
         $countryCode = preg_replace('/[^0-9+]/', '', (string) $countryCode);
@@ -385,6 +436,9 @@ class AuthController extends Controller
         return str_starts_with($countryCode, '+') ? $countryCode : '+'.$countryCode;
     }
 
+    /**
+     * Normalize email.
+     */
     private function normalizeEmail(?string $email): ?string
     {
         $email = trim((string) $email);
@@ -392,6 +446,9 @@ class AuthController extends Controller
         return $email !== '' ? Str::lower($email) : null;
     }
 
+    /**
+     * Normalize username.
+     */
     private function normalizeUsername(?string $username): ?string
     {
         $username = trim((string) $username);
@@ -399,6 +456,9 @@ class AuthController extends Controller
         return $username !== '' ? Str::lower($username) : null;
     }
 
+    /**
+     * Resolve base user country.
+     */
     private function resolveBaseUserCountry(BaseUser $baseUser): ?Country
     {
         $countryCode = $this->normalizeCountryCode(data_get($baseUser->meta, 'country_code'));

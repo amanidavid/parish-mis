@@ -12,6 +12,9 @@ class AdminAnalyticsService
 {
     private const CACHE_TTL_SECONDS = 300;
 
+    /**
+     * Handle revenue trend.
+     */
     public function revenueTrend(array $filters = []): array
     {
         return $this->remember(__FUNCTION__, $filters, function () use ($filters) {
@@ -48,6 +51,9 @@ class AdminAnalyticsService
         });
     }
 
+    /**
+     * Handle subscription status trend.
+     */
     public function subscriptionStatusTrend(array $filters = []): array
     {
         return $this->remember(__FUNCTION__, $filters, function () use ($filters) {
@@ -135,6 +141,9 @@ class AdminAnalyticsService
         });
     }
 
+    /**
+     * Handle property growth trend.
+     */
     public function propertyGrowthTrend(array $filters = []): array
     {
         return $this->remember(__FUNCTION__, $filters, function () use ($filters) {
@@ -203,6 +212,9 @@ class AdminAnalyticsService
         });
     }
 
+    /**
+     * Handle subscription status split.
+     */
     public function subscriptionStatusSplit(): array
     {
         return $this->remember(__FUNCTION__, [], function () {
@@ -272,6 +284,9 @@ class AdminAnalyticsService
         });
     }
 
+    /**
+     * Handle top billing rules.
+     */
     public function topBillingRules(array $filters = []): array
     {
         return $this->remember(__FUNCTION__, $filters, function () use ($filters) {
@@ -340,6 +355,9 @@ class AdminAnalyticsService
         });
     }
 
+    /**
+     * Remember.
+     */
     private function remember(string $method, array $filters, callable $callback): array
     {
         $cacheKey = 'admin.analytics.'.strtolower($method).'.'.md5(json_encode($filters));
@@ -351,6 +369,9 @@ class AdminAnalyticsService
         );
     }
 
+    /**
+     * Resolve window.
+     */
     private function resolveWindow(array $filters): array
     {
         $period = (string) ($filters['period'] ?? 'month');
@@ -404,7 +425,7 @@ class AdminAnalyticsService
     }
 
     /**
-     * @return array<int, array{key:string,label:string,start:Carbon,end:Carbon}>
+     * Build buckets.
      */
     private function buildBuckets(Carbon $startDate, Carbon $endDate, string $bucketBy): array
     {
@@ -462,6 +483,9 @@ class AdminAnalyticsService
         return $buckets;
     }
 
+    /**
+     * Map buckets.
+     */
     private function mapBuckets(array $buckets, Collection $rows, callable $callback): array
     {
         return collect($buckets)
@@ -470,6 +494,9 @@ class AdminAnalyticsService
             ->all();
     }
 
+    /**
+     * Format window filters.
+     */
     private function formatWindowFilters(array $window): array
     {
         return [
@@ -480,6 +507,9 @@ class AdminAnalyticsService
         ];
     }
 
+    /**
+     * Resolve custom bucket by.
+     */
     private function resolveCustomBucketBy(Carbon $startDate, Carbon $endDate): string
     {
         $days = $startDate->diffInDays($endDate) + 1;
@@ -491,6 +521,9 @@ class AdminAnalyticsService
         };
     }
 
+    /**
+     * Date bucket expression.
+     */
     private function dateBucketExpression(string $column, string $bucketBy): string
     {
         $driver = DB::connection('base')->getDriverName();
@@ -511,6 +544,9 @@ class AdminAnalyticsService
         };
     }
 
+    /**
+     * Timestamp bucket expression.
+     */
     private function timestampBucketExpression(string $column, string $bucketBy): string
     {
         $driver = DB::connection('base')->getDriverName();
@@ -530,6 +566,9 @@ class AdminAnalyticsService
         };
     }
 
+    /**
+     * Total non deleted properties.
+     */
     private function totalNonDeletedProperties(): int
     {
         return DB::connection('base')
@@ -538,6 +577,9 @@ class AdminAnalyticsService
             ->count();
     }
 
+    /**
+     * Bucket rows query.
+     */
     private function bucketRowsQuery(array $buckets)
     {
         $connection = DB::connection('base');

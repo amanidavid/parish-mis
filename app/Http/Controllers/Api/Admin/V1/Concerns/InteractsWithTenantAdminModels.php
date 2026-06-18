@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Builder;
 
 trait InteractsWithTenantAdminModels
 {
+    /**
+     * Apply tenant prefix search.
+     */
     protected function applyTenantPrefixSearch(Builder $query, ?string $search, array $columns): Builder
     {
         $search = trim((string) $search);
@@ -23,6 +26,9 @@ trait InteractsWithTenantAdminModels
         });
     }
 
+    /**
+     * Apply tenant sort.
+     */
     protected function applyTenantSort(
         Builder $query,
         ?string $sort,
@@ -44,6 +50,9 @@ trait InteractsWithTenantAdminModels
         return $query->orderBy($column, $direction);
     }
 
+    /**
+     * Run in tenant context.
+     */
     protected function runInTenantContext(Tenant $tenant, callable $callback): mixed
     {
         $currentTenant = Tenant::current();
@@ -64,6 +73,9 @@ trait InteractsWithTenantAdminModels
         }
     }
 
+    /**
+     * Tenant connection name.
+     */
     protected function tenantConnectionName(): string
     {
         return app(TenantConnectionManager::class)->connectionName();

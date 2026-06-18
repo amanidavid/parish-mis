@@ -12,12 +12,18 @@ use InvalidArgumentException;
 
 class PropertySubscriptionAutomationService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertySubscriptionService $propertySubscriptionService,
         private CustomerContractAutomationService $customerContractAutomationService,
     ) {
     }
 
+    /**
+     * List task settings.
+     */
     public function listTaskSettings()
     {
         $this->ensureDefaultTasks();
@@ -27,6 +33,9 @@ class PropertySubscriptionAutomationService
             ->get();
     }
 
+    /**
+     * List task runs.
+     */
     public function listTaskRuns(AutomationTaskSetting $taskSetting, int $perPage = 15): LengthAwarePaginator
     {
         return $taskSetting->runs()
@@ -35,6 +44,9 @@ class PropertySubscriptionAutomationService
             ->withQueryString();
     }
 
+    /**
+     * Update task setting.
+     */
     public function updateTaskSetting(AutomationTaskSetting $taskSetting, array $payload, ?object $adminUser = null): AutomationTaskSetting
     {
         $this->ensureSupportedTask($taskSetting);
@@ -63,11 +75,17 @@ class PropertySubscriptionAutomationService
         return $taskSetting->fresh();
     }
 
+    /**
+     * Handle the run now request.
+     */
     public function runNow(AutomationTaskSetting $taskSetting): AutomationTaskRun
     {
         return $this->runTask($taskSetting, true);
     }
 
+    /**
+     * Handle run task by key.
+     */
     public function runTaskByKey(string $taskKey, bool $force = false): ?AutomationTaskRun
     {
         $taskSetting = AutomationTaskSetting::query()
@@ -81,6 +99,9 @@ class PropertySubscriptionAutomationService
         return $this->runTask($taskSetting, $force);
     }
 
+    /**
+     * Handle run due tasks.
+     */
     public function runDueTasks(): int
     {
         $this->ensureDefaultTasks();
@@ -103,6 +124,9 @@ class PropertySubscriptionAutomationService
         return $executed;
     }
 
+    /**
+     * Run task.
+     */
     private function runTask(AutomationTaskSetting $taskSetting, bool $force): AutomationTaskRun
     {
         $this->ensureSupportedTask($taskSetting);
@@ -167,6 +191,9 @@ class PropertySubscriptionAutomationService
         });
     }
 
+    /**
+     * Ensure default tasks.
+     */
     private function ensureDefaultTasks(): void
     {
         foreach ($this->defaultTasks() as $taskKey => $taskDefinition) {
@@ -177,6 +204,9 @@ class PropertySubscriptionAutomationService
         }
     }
 
+    /**
+     * Ensure supported task.
+     */
     private function ensureSupportedTask(AutomationTaskSetting $taskSetting): void
     {
         if (!array_key_exists($taskSetting->task_key, $this->defaultTasks())) {
@@ -184,6 +214,9 @@ class PropertySubscriptionAutomationService
         }
     }
 
+    /**
+     * Default tasks.
+     */
     private function defaultTasks(): array
     {
         return [
@@ -210,6 +243,9 @@ class PropertySubscriptionAutomationService
         ];
     }
 
+    /**
+     * Success message for task.
+     */
     private function successMessageForTask(string $taskKey, int $rowsAffected): string
     {
         return match ($taskKey) {
@@ -223,6 +259,9 @@ class PropertySubscriptionAutomationService
         };
     }
 
+    /**
+     * Determine whether due.
+     */
     private function isDue(AutomationTaskSetting $taskSetting, Carbon $now): bool
     {
         if (!$taskSetting->enabled) {
@@ -232,6 +271,9 @@ class PropertySubscriptionAutomationService
         return $taskSetting->next_run_at === null || Carbon::parse($taskSetting->next_run_at)->lte($now);
     }
 
+    /**
+     * Compute next run at.
+     */
     private function computeNextRunAt(
         string $scheduleMode,
         ?int $intervalMinutes,

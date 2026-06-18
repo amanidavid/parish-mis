@@ -14,11 +14,17 @@ use InvalidArgumentException;
 
 class TenantSubscriptionUsageAdjustmentController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
     ) {
     }
 
+    /**
+     * Handle the preview request.
+     */
     public function preview(Tenant $tenant)
     {
         $preview = $this->subscriptionUsageAdjustmentService->previewCurrentAdjustment($tenant);
@@ -29,6 +35,9 @@ class TenantSubscriptionUsageAdjustmentController extends Controller
         );
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(TenantUsageAdjustmentIndexRequest $request, Tenant $tenant)
     {
         $adjustments = $this->subscriptionUsageAdjustmentService->listAdjustments($tenant, $request->validated());
@@ -39,6 +48,9 @@ class TenantSubscriptionUsageAdjustmentController extends Controller
         );
     }
 
+    /**
+     * Handle the apply request.
+     */
     public function apply(Tenant $tenant, SubscriptionUsageAdjustment $usageAdjustment)
     {
         if ($usageAdjustment->tenant_id !== $tenant->id) {
@@ -64,6 +76,9 @@ class TenantSubscriptionUsageAdjustmentController extends Controller
         );
     }
 
+    /**
+     * Handle the waive request.
+     */
     public function waive(Tenant $tenant, SubscriptionUsageAdjustment $usageAdjustment)
     {
         if ($usageAdjustment->tenant_id !== $tenant->id) {

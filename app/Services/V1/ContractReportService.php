@@ -12,11 +12,17 @@ class ContractReportService
 {
     private const MAX_PER_PAGE = 100;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     ) {
     }
 
+    /**
+     * Handle the summary request.
+     */
     public function summary(User $tenantUser, array $filters = []): array
     {
         $scope = $this->resolveScope($tenantUser);
@@ -64,6 +70,9 @@ class ContractReportService
         ];
     }
 
+    /**
+     * Handle the by property request.
+     */
     public function byProperty(User $tenantUser, array $filters = []): LengthAwarePaginator
     {
         $scope = $this->resolveScope($tenantUser);
@@ -97,6 +106,9 @@ class ContractReportService
         return $query->paginate($perPage)->withQueryString();
     }
 
+    /**
+     * Handle the expiring request.
+     */
     public function expiring(User $tenantUser, array $filters = []): LengthAwarePaginator
     {
         $scope = $this->resolveScope($tenantUser);
@@ -151,6 +163,9 @@ class ContractReportService
         return $query->paginate($perPage)->withQueryString();
     }
 
+    /**
+     * Handle the chart request.
+     */
     public function chart(User $tenantUser, array $filters = []): array
     {
         [$startDate, $endDate, $range] = $this->resolveChartWindow($filters);
@@ -185,6 +200,8 @@ class ContractReportService
         [$bucketSql, $bucketLabelSql] = $this->chartBucketExpressions($period);
         $recognizedStatuses = ['active', 'renewed'];
 
+        // We aggregate once by chart bucket, then derive summary totals from those rows
+        // to avoid running the same filtered contract scan twice.
         $series = (clone $query)
             ->selectRaw($bucketSql.' as bucket_key')
             ->selectRaw($bucketLabelSql.' as bucket_label')
@@ -236,6 +253,9 @@ class ContractReportService
         ];
     }
 
+    /**
+     * Contracts base query.
+     */
     private function contractsBaseQuery(
         array $scope,
         array $filters,
@@ -284,6 +304,9 @@ class ContractReportService
         return $query;
     }
 
+    /**
+     * Resolve scope.
+     */
     private function resolveScope(User $tenantUser): array
     {
         return [
@@ -292,6 +315,9 @@ class ContractReportService
         ];
     }
 
+    /**
+     * Apply by property sort.
+     */
     private function applyByPropertySort(QueryBuilder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -307,6 +333,9 @@ class ContractReportService
         };
     }
 
+    /**
+     * Apply expiring sort.
+     */
     private function applyExpiringSort(QueryBuilder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -322,6 +351,9 @@ class ContractReportService
         };
     }
 
+    /**
+     * Resolve expiry window.
+     */
     private function resolveExpiryWindow(array $filters): array
     {
         $startDate = !empty($filters['start_date'] ?? null)
@@ -335,6 +367,9 @@ class ContractReportService
         return [$startDate, $endDate];
     }
 
+    /**
+     * Resolve chart window.
+     */
     private function resolveChartWindow(array $filters): array
     {
         $range = $filters['range'] ?? 'last_12_months';
@@ -359,6 +394,9 @@ class ContractReportService
         };
     }
 
+    /**
+     * Default chart period for range.
+     */
     private function defaultChartPeriodForRange(string $range): string
     {
         return match ($range) {
@@ -368,6 +406,9 @@ class ContractReportService
         };
     }
 
+    /**
+     * Chart bucket expressions.
+     */
     private function chartBucketExpressions(string $period): array
     {
         $driver = DB::connection($this->tenantConnectionName())->getDriverName();
@@ -405,6 +446,9 @@ class ContractReportService
         };
     }
 
+    /**
+     * Apply property scope to column.
+     */
     private function applyPropertyScopeToColumn(QueryBuilder $query, array $scope, string $propertyColumn): QueryBuilder
     {
         if ($scope['bypass'] === true) {
@@ -419,11 +463,17 @@ class ContractReportService
         });
     }
 
+    /**
+     * Tenant table.
+     */
     private function tenantTable(string $table): QueryBuilder
     {
         return DB::connection($this->tenantConnectionName())->table($table);
     }
 
+    /**
+     * Tenant connection name.
+     */
     private function tenantConnectionName(): string
     {
         return (string) config('multitenancy.tenant_database_connection_name', 'tenant');

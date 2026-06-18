@@ -27,6 +27,9 @@ class CustomerContractController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private CustomerContractRuleService $ruleService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
@@ -35,6 +38,9 @@ class CustomerContractController extends Controller
     ) {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(CustomerContractIndexRequest $request)
     {
         $this->authorize('viewAny', CustomerContract::class);
@@ -97,6 +103,9 @@ class CustomerContractController extends Controller
         return ApiResponse::resource(CustomerContractResource::collection($contracts), ApiMessages::listRetrieved('customer contracts'));
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreCustomerContractRequest $request)
     {
         $this->authorize('create', CustomerContract::class);
@@ -163,6 +172,9 @@ class CustomerContractController extends Controller
         );
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(CustomerContract $customerContract)
     {
         $this->authorize('view', $customerContract);
@@ -173,6 +185,9 @@ class CustomerContractController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateCustomerContractRequest $request, CustomerContract $customerContract)
     {
         $this->authorize('update', $customerContract);
@@ -258,6 +273,9 @@ class CustomerContractController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(CustomerContract $customerContract)
     {
         $this->authorize('delete', $customerContract);
@@ -285,6 +303,9 @@ class CustomerContractController extends Controller
         return ApiResponse::success(ApiMessages::deleted('customer contract'));
     }
 
+    /**
+     * Resolve customer and unit.
+     */
     private function resolveCustomerAndUnit(array $data, ?Customer $fallbackCustomer = null, ?int $fallbackUnitId = null): array
     {
         $customer = $fallbackCustomer;
@@ -311,6 +332,9 @@ class CustomerContractController extends Controller
         return [$customer, $unitId, null];
     }
 
+    /**
+     * Ensure user can access property.
+     */
     private function ensureUserCanAccessProperty(Property $property): ?\Illuminate\Http\JsonResponse
     {
         $tenantUser = request()->user();
@@ -323,6 +347,9 @@ class CustomerContractController extends Controller
         return null;
     }
 
+    /**
+     * Assert customer belongs to unit property.
+     */
     private function assertCustomerBelongsToUnitProperty(Customer $customer, Unit $unit): ?\Illuminate\Http\JsonResponse
     {
         $propertyId = $unit->propertyFloor?->property_id;
@@ -338,6 +365,9 @@ class CustomerContractController extends Controller
         return null;
     }
 
+    /**
+     * Assert workspace allows inventory mutation.
+     */
     private function assertWorkspaceAllowsInventoryMutation(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -347,6 +377,9 @@ class CustomerContractController extends Controller
         }
     }
 
+    /**
+     * Assert property allows contract operations.
+     */
     private function assertPropertyAllowsContractOperations(Property $property, ?string $startDate = null): ?\Illuminate\Http\JsonResponse
     {
         $tenant = request()->attributes->get('tenant');

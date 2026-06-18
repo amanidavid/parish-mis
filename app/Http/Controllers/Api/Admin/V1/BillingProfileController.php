@@ -21,11 +21,17 @@ use Illuminate\Support\Str;
 
 class BillingProfileController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private BillingProfileService $billingProfileService)
     {
     }
 
     /** List billing profiles for admin management screens with filterable pricing metadata. */
+    /**
+     * Handle the index request.
+     */
     public function index(BillingProfileIndexRequest $request)
     {
         $filters = $request->validated();
@@ -70,6 +76,9 @@ class BillingProfileController extends Controller
     }
 
     /** Create a reusable billing profile that can later be assigned to workspaces. */
+    /**
+     * Handle the store request.
+     */
     public function store(StoreBillingProfileRequest $request)
     {
         $data = $request->validated();
@@ -100,6 +109,9 @@ class BillingProfileController extends Controller
     }
 
     /** Return one billing profile together with its rule count for detail screens. */
+    /**
+     * Handle the show request.
+     */
     public function show(BillingProfile $billingProfile)
     {
         return ApiResponse::resource(
@@ -109,6 +121,9 @@ class BillingProfileController extends Controller
     }
 
     /** Update pricing metadata on an existing billing profile without touching its rule history. */
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateBillingProfileRequest $request, BillingProfile $billingProfile)
     {
         $data = $request->validated();
@@ -142,6 +157,9 @@ class BillingProfileController extends Controller
     }
 
     /** List billing rules across profiles for admin dropdowns and rule-selection workflows. */
+    /**
+     * Handle index rules.
+     */
     public function indexRules(BillingRuleIndexRequest $request)
     {
         $filters = $request->validated();
@@ -153,6 +171,9 @@ class BillingProfileController extends Controller
     }
 
     /** List the paginated pricing rules that belong to one billing profile. */
+    /**
+     * Handle the rules request.
+     */
     public function rules(BillingRuleIndexRequest $request, BillingProfile $billingProfile)
     {
         $filters = $request->validated();
@@ -164,6 +185,9 @@ class BillingProfileController extends Controller
     }
 
     /** Add a new unit-range pricing rule to a billing profile after overlap validation. */
+    /**
+     * Store rule.
+     */
     public function storeRule(StoreBillingRuleRequest $request, BillingProfile $billingProfile)
     {
         $data = $request->validated();
@@ -193,6 +217,9 @@ class BillingProfileController extends Controller
     }
 
     /** Update a billing rule while protecting the profile from overlapping active ranges. */
+    /**
+     * Update rule.
+     */
     public function updateRule(UpdateBillingRuleRequest $request, BillingRule $billingRule)
     {
         $data = $request->validated();
@@ -226,6 +253,9 @@ class BillingProfileController extends Controller
         return ApiResponse::resource(new BillingRuleResource($billingRule->fresh()), 'Billing rule updated successfully.');
     }
 
+    /**
+     * New billing rule query.
+     */
     private function newBillingRuleQuery(array $filters, ?BillingProfile $billingProfile = null): EloquentBuilder
     {
         $query = BillingRule::query()
@@ -261,6 +291,9 @@ class BillingProfileController extends Controller
         return $query;
     }
 
+    /**
+     * Apply billing rule filters.
+     */
     private function applyBillingRuleFilters(EloquentBuilder $query, array $filters): void
     {
         if (!empty($filters['status'] ?? null)) {
@@ -288,6 +321,9 @@ class BillingProfileController extends Controller
         }
     }
 
+    /**
+     * Apply billing rule sort.
+     */
     private function applyBillingRuleSort(EloquentBuilder $query, ?string $sort): void
     {
         $sort = trim((string) $sort);

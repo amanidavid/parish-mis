@@ -24,6 +24,9 @@ use InvalidArgumentException;
 
 class WorkspaceController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private SubscriptionBillingProfileChangeService $subscriptionBillingProfileChangeService,
@@ -34,6 +37,9 @@ class WorkspaceController extends Controller
     }
 
     /** List workspaces that belong to the authenticated base user. */
+    /**
+     * Handle the index request.
+     */
     public function index(Request $request)
     {
         $baseUser = $this->resolveBaseUser();
@@ -49,6 +55,9 @@ class WorkspaceController extends Controller
     }
 
     /** Create a self-service workspace and queue tenant provisioning for the requester. */
+    /**
+     * Handle the store request.
+     */
     public function store(StoreWorkspaceRequest $request)
     {
         $baseUser = $this->resolveBaseUser();
@@ -86,6 +95,9 @@ class WorkspaceController extends Controller
     }
 
     /** Return one workspace only if the authenticated base user belongs to it. */
+    /**
+     * Handle the show request.
+     */
     public function show(Tenant $workspace)
     {
         $baseUser = $this->resolveBaseUser();
@@ -103,6 +115,9 @@ class WorkspaceController extends Controller
     }
 
     /** Return the active workspace subscription summary after applying any due scheduled profile change. */
+    /**
+     * Handle the subscription request.
+     */
     public function subscription()
     {
         $tenant = request()->attributes->get('tenant');
@@ -125,6 +140,9 @@ class WorkspaceController extends Controller
     }
 
     /** Preview how a billing profile change would affect the current workspace before any write occurs. */
+    /**
+     * Handle preview billing profile change.
+     */
     public function previewBillingProfileChange(PreviewWorkspaceBillingProfileChangeRequest $request)
     {
         $tenant = request()->attributes->get('tenant');
@@ -160,6 +178,9 @@ class WorkspaceController extends Controller
     }
 
     /** Return paginated property-by-property billing estimates for the current workspace. */
+    /**
+     * Handle subscription properties.
+     */
     public function subscriptionProperties(WorkspaceSubscriptionPropertyIndexRequest $request)
     {
         $tenant = request()->attributes->get('tenant');
@@ -184,6 +205,9 @@ class WorkspaceController extends Controller
         );
     }
 
+    /**
+     * Resolve base user.
+     */
     private function resolveBaseUser(): BaseUser
     {
         $baseUser = request()->attributes->get('base_user') ?? request()->attributes->get('auth_user');
@@ -195,6 +219,9 @@ class WorkspaceController extends Controller
         return $baseUser;
     }
 
+    /**
+     * Map workspace creation error.
+     */
     private function mapWorkspaceCreationError(string $message): array
     {
         return match ($message) {

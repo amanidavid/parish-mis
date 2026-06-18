@@ -7,6 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 
 trait InteractsWithTenantModels
 {
+    /**
+     * Apply prefix search.
+     */
     protected function applyPrefixSearch(Builder $query, ?string $search, array $columns): Builder
     {
         $search = trim((string) $search);
@@ -22,6 +25,9 @@ trait InteractsWithTenantModels
         });
     }
 
+    /**
+     * Apply sort.
+     */
     protected function applySort(
         Builder $query,
         ?string $sort,
@@ -43,6 +49,9 @@ trait InteractsWithTenantModels
         return $query->orderBy($column, $direction);
     }
 
+    /**
+     * Resolve model by uuid.
+     */
     protected function resolveModelByUuid(string $modelClass, ?string $uuid): ?Model
     {
         if (empty($uuid)) {

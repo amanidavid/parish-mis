@@ -14,10 +14,16 @@ use App\Support\ApiResponse;
 
 class MaintenanceReportController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private MaintenanceReportService $maintenanceReportService)
     {
     }
 
+    /**
+     * Handle the summary request.
+     */
     public function summary(MaintenanceExpenseSummaryRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -31,6 +37,9 @@ class MaintenanceReportController extends Controller
         );
     }
 
+    /**
+     * Handle the by property request.
+     */
     public function byProperty(MaintenanceExpenseByPropertyRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -60,6 +69,9 @@ class MaintenanceReportController extends Controller
         ]);
     }
 
+    /**
+     * Handle recent expenses.
+     */
     public function recentExpenses(RecentMaintenanceExpenseRequest $request)
     {
         $tenantUser = $this->resolveTenantUser();
@@ -89,6 +101,9 @@ class MaintenanceReportController extends Controller
         ]);
     }
 
+    /**
+     * Resolve tenant user.
+     */
     private function resolveTenantUser(): TenantUser|\Illuminate\Http\JsonResponse
     {
         $tenantUser = request()->user();

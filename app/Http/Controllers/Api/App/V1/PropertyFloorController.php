@@ -26,6 +26,9 @@ class PropertyFloorController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
         private SubscriptionService $subscriptionService,
@@ -35,6 +38,9 @@ class PropertyFloorController extends Controller
     ) {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(PropertyFloorIndexRequest $request)
     {
         $this->authorize('viewAny', PropertyFloor::class);
@@ -74,6 +80,9 @@ class PropertyFloorController extends Controller
         return ApiResponse::resource(PropertyFloorResource::collection($floors), ApiMessages::listRetrieved('property floors'));
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StorePropertyFloorRequest $request)
     {
         $this->authorize('create', PropertyFloor::class);
@@ -122,6 +131,9 @@ class PropertyFloorController extends Controller
         return ApiResponse::resource(new PropertyFloorResource($floor->load(['property'])->loadCount('units')), ApiMessages::created('property floor'), 201);
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(PropertyFloor $propertyFloor)
     {
         $this->authorize('view', $propertyFloor);
@@ -129,6 +141,9 @@ class PropertyFloorController extends Controller
         return ApiResponse::resource(new PropertyFloorResource($propertyFloor->load(['property'])->loadCount('units')), ApiMessages::detailsRetrieved('property floor'));
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdatePropertyFloorRequest $request, PropertyFloor $propertyFloor)
     {
         $this->authorize('update', $propertyFloor);
@@ -200,6 +215,9 @@ class PropertyFloorController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(PropertyFloor $propertyFloor)
     {
         $this->authorize('delete', $propertyFloor);
@@ -224,6 +242,9 @@ class PropertyFloorController extends Controller
         return ApiResponse::success(ApiMessages::deleted('property floor'));
     }
 
+    /**
+     * Sync workspace usage.
+     */
     private function syncWorkspaceUsage(array $propertyIds = []): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -237,6 +258,9 @@ class PropertyFloorController extends Controller
         }
     }
 
+    /**
+     * Assert workspace allows inventory mutation.
+     */
     private function assertWorkspaceAllowsInventoryMutation(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -246,6 +270,9 @@ class PropertyFloorController extends Controller
         }
     }
 
+    /**
+     * Capture usage baseline.
+     */
     private function captureUsageBaseline(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -255,6 +282,9 @@ class PropertyFloorController extends Controller
         }
     }
 
+    /**
+     * Assert property allows operational mutation.
+     */
     private function assertPropertyAllowsOperationalMutation(Property $property, string $moduleName): ?\Illuminate\Http\JsonResponse
     {
         $tenant = request()->attributes->get('tenant');
