@@ -120,6 +120,7 @@ Route::prefix('v1')->group(function () {
                 Route::prefix('reports/contracts')->group(function () {
                     Route::get('summary', [ContractReportController::class, 'summary']);
                     Route::get('by-property', [ContractReportController::class, 'byProperty']);
+                    Route::get('chart', [ContractReportController::class, 'chart']);
                     Route::get('expiring', [ContractReportController::class, 'expiring']);
                 });
                 Route::prefix('reports/maintenance')->group(function () {

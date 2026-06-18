@@ -22,24 +22,15 @@ class ContractReportService
         $scope = $this->resolveScope($tenantUser);
         $query = $this->contractsBaseQuery($scope, $filters);
 
-        $totals = (clone $query)
-            ->selectRaw('COUNT(customer_contracts.id) as contracts_count')
-            ->selectRaw('COALESCE(SUM(customer_contracts.amount), 0) as total_contract_amount')
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'active' THEN 1 ELSE 0 END) as active_contracts_count")
-            ->selectRaw("COALESCE(SUM(CASE WHEN customer_contracts.status = 'active' THEN customer_contracts.amount ELSE 0 END), 0) as active_contract_amount")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'draft' THEN 1 ELSE 0 END) as draft_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'expired' THEN 1 ELSE 0 END) as expired_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'renewed' THEN 1 ELSE 0 END) as renewed_contracts_count")
-            ->first();
-
-        $statusBreakdown = (clone $query)
+        $statusRows = (clone $query)
             ->select('customer_contracts.status')
             ->selectRaw('COUNT(customer_contracts.id) as contracts_count')
             ->selectRaw('COALESCE(SUM(customer_contracts.amount), 0) as total_contract_amount')
             ->groupBy('customer_contracts.status')
             ->orderBy('customer_contracts.status')
-            ->get()
+            ->get();
+
+        $statusBreakdown = $statusRows
             ->map(fn ($row) => [
                 'status' => $row->status,
                 'contracts_count' => (int) $row->contracts_count,
@@ -47,6 +38,17 @@ class ContractReportService
             ])
             ->values()
             ->all();
+
+        $totals = [
+            'contracts_count' => (int) $statusRows->sum(fn ($row) => (int) $row->contracts_count),
+            'total_contract_amount' => (float) $statusRows->sum(fn ($row) => (float) $row->total_contract_amount),
+            'active_contracts_count' => (int) optional($statusRows->firstWhere('status', 'active'))->contracts_count,
+            'active_contract_amount' => (float) optional($statusRows->firstWhere('status', 'active'))->total_contract_amount,
+            'draft_contracts_count' => (int) optional($statusRows->firstWhere('status', 'draft'))->contracts_count,
+            'expired_contracts_count' => (int) optional($statusRows->firstWhere('status', 'expired'))->contracts_count,
+            'terminated_contracts_count' => (int) optional($statusRows->firstWhere('status', 'terminated'))->contracts_count,
+            'renewed_contracts_count' => (int) optional($statusRows->firstWhere('status', 'renewed'))->contracts_count,
+        ];
 
         return [
             'filters' => [
@@ -57,16 +59,7 @@ class ContractReportService
                 'start_date' => $filters['start_date'] ?? null,
                 'end_date' => $filters['end_date'] ?? null,
             ],
-            'totals' => [
-                'contracts_count' => (int) ($totals->contracts_count ?? 0),
-                'total_contract_amount' => (float) ($totals->total_contract_amount ?? 0),
-                'active_contracts_count' => (int) ($totals->active_contracts_count ?? 0),
-                'active_contract_amount' => (float) ($totals->active_contract_amount ?? 0),
-                'draft_contracts_count' => (int) ($totals->draft_contracts_count ?? 0),
-                'expired_contracts_count' => (int) ($totals->expired_contracts_count ?? 0),
-                'terminated_contracts_count' => (int) ($totals->terminated_contracts_count ?? 0),
-                'renewed_contracts_count' => (int) ($totals->renewed_contracts_count ?? 0),
-            ],
+            'totals' => $totals,
             'by_status' => $statusBreakdown,
         ];
     }
@@ -156,6 +149,91 @@ class ContractReportService
         $perPage = min(max((int) ($filters['per_page'] ?? 15), 1), self::MAX_PER_PAGE);
 
         return $query->paginate($perPage)->withQueryString();
+    }
+
+    public function chart(User $tenantUser, array $filters = []): array
+    {
+        [$startDate, $endDate, $range] = $this->resolveChartWindow($filters);
+        $period = $filters['period'] ?? $this->defaultChartPeriodForRange($range);
+        $scope = $this->resolveScope($tenantUser);
+
+        $property = $this->tenantTable('properties')
+            ->where('uuid', $filters['property_uuid'])
+            ->select(['id', 'uuid', 'name', 'status'])
+            ->when($scope['bypass'] !== true, fn (QueryBuilder $propertyQuery) => $propertyQuery->whereExists(function (QueryBuilder $innerQuery) use ($scope) {
+                $innerQuery->selectRaw('1')
+                    ->from('staff_property_assignments')
+                    ->whereColumn('staff_property_assignments.property_id', 'properties.id')
+                    ->where('staff_property_assignments.user_id', $scope['user_id']);
+            }))
+            ->first();
+
+        abort_if(!$property, 404, 'Property not found.');
+
+        $query = $this->tenantTable('customer_contracts')
+            ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
+            ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
+            ->where('property_floors.property_id', $property->id)
+            ->whereBetween('customer_contracts.start_date', [$startDate, $endDate]);
+
+        $query = $this->applyPropertyScopeToColumn($query, $scope, 'property_floors.property_id');
+
+        if (!empty($filters['billing_cycle'] ?? null)) {
+            $query->where('customer_contracts.billing_cycle', $filters['billing_cycle']);
+        }
+
+        [$bucketSql, $bucketLabelSql] = $this->chartBucketExpressions($period);
+        $recognizedStatuses = ['active', 'renewed'];
+
+        $series = (clone $query)
+            ->selectRaw($bucketSql.' as bucket_key')
+            ->selectRaw($bucketLabelSql.' as bucket_label')
+            ->selectRaw('COUNT(customer_contracts.id) as contracts_count')
+            ->selectRaw("SUM(CASE WHEN customer_contracts.status IN ('active', 'renewed') THEN 1 ELSE 0 END) as recognized_contracts_count")
+            ->selectRaw('COALESCE(SUM(customer_contracts.amount), 0) as total_contract_amount')
+            ->selectRaw("COALESCE(SUM(CASE WHEN customer_contracts.status IN ('active', 'renewed') THEN customer_contracts.amount ELSE 0 END), 0) as recognized_contract_amount")
+            ->groupByRaw($bucketSql.', '.$bucketLabelSql)
+            ->orderBy('bucket_key')
+            ->get();
+
+        $summary = [
+            'contracts_count' => (int) $series->sum(fn ($row) => (int) $row->contracts_count),
+            'recognized_contracts_count' => (int) $series->sum(fn ($row) => (int) $row->recognized_contracts_count),
+            'total_contract_amount' => (float) $series->sum(fn ($row) => (float) $row->total_contract_amount),
+            'recognized_contract_amount' => (float) $series->sum(fn ($row) => (float) $row->recognized_contract_amount),
+        ];
+
+        $series = $series
+            ->map(fn ($row) => [
+                'bucket_key' => $row->bucket_key,
+                'bucket_label' => $row->bucket_label,
+                'contracts_count' => (int) $row->contracts_count,
+                'recognized_contracts_count' => (int) $row->recognized_contracts_count,
+                'total_contract_amount' => (float) $row->total_contract_amount,
+                'recognized_contract_amount' => (float) $row->recognized_contract_amount,
+            ])
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'property_uuid' => $filters['property_uuid'],
+                'billing_cycle' => $filters['billing_cycle'] ?? null,
+                'range' => $range,
+                'period' => $period,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'metric' => $filters['metric'] ?? 'recognized_contract_amount',
+                'recognized_statuses' => $recognizedStatuses,
+            ],
+            'property' => [
+                'uuid' => $property->uuid,
+                'name' => $property->name,
+                'status' => $property->status,
+            ],
+            'summary' => $summary,
+            'series' => $series,
+        ];
     }
 
     private function contractsBaseQuery(
@@ -255,6 +333,76 @@ class ContractReportService
             : now()->addDays((int) ($filters['days'] ?? 30))->toDateString();
 
         return [$startDate, $endDate];
+    }
+
+    private function resolveChartWindow(array $filters): array
+    {
+        $range = $filters['range'] ?? 'last_12_months';
+
+        if ($range === 'custom') {
+            return [
+                Carbon::parse($filters['start_date'])->toDateString(),
+                Carbon::parse($filters['end_date'])->toDateString(),
+                $range,
+            ];
+        }
+
+        $today = now()->startOfDay();
+
+        return match ($range) {
+            'today' => [$today->toDateString(), $today->toDateString(), $range],
+            'last_7_days' => [$today->copy()->subDays(6)->toDateString(), $today->toDateString(), $range],
+            'last_30_days' => [$today->copy()->subDays(29)->toDateString(), $today->toDateString(), $range],
+            'this_month' => [$today->copy()->startOfMonth()->toDateString(), $today->copy()->endOfMonth()->toDateString(), $range],
+            'this_year' => [$today->copy()->startOfYear()->toDateString(), $today->copy()->endOfYear()->toDateString(), $range],
+            default => [$today->copy()->subMonths(11)->startOfMonth()->toDateString(), $today->copy()->endOfMonth()->toDateString(), 'last_12_months'],
+        };
+    }
+
+    private function defaultChartPeriodForRange(string $range): string
+    {
+        return match ($range) {
+            'today', 'last_7_days', 'last_30_days' => 'day',
+            'this_year', 'last_12_months' => 'month',
+            default => 'month',
+        };
+    }
+
+    private function chartBucketExpressions(string $period): array
+    {
+        $driver = DB::connection($this->tenantConnectionName())->getDriverName();
+
+        if ($driver === 'pgsql') {
+            return match ($period) {
+                'day' => [
+                    "TO_CHAR(customer_contracts.start_date, 'YYYY-MM-DD')",
+                    "TO_CHAR(customer_contracts.start_date, 'DD Mon YYYY')",
+                ],
+                'year' => [
+                    "TO_CHAR(customer_contracts.start_date, 'YYYY')",
+                    "TO_CHAR(customer_contracts.start_date, 'YYYY')",
+                ],
+                default => [
+                    "TO_CHAR(customer_contracts.start_date, 'YYYY-MM')",
+                    "TO_CHAR(customer_contracts.start_date, 'Mon YYYY')",
+                ],
+            };
+        }
+
+        return match ($period) {
+            'day' => [
+                "DATE_FORMAT(customer_contracts.start_date, '%Y-%m-%d')",
+                "DATE_FORMAT(customer_contracts.start_date, '%d %b %Y')",
+            ],
+            'year' => [
+                "DATE_FORMAT(customer_contracts.start_date, '%Y')",
+                "DATE_FORMAT(customer_contracts.start_date, '%Y')",
+            ],
+            default => [
+                "DATE_FORMAT(customer_contracts.start_date, '%Y-%m')",
+                "DATE_FORMAT(customer_contracts.start_date, '%b %Y')",
+            ],
+        };
     }
 
     private function applyPropertyScopeToColumn(QueryBuilder $query, array $scope, string $propertyColumn): QueryBuilder

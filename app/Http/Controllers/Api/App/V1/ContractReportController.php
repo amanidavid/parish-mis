@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\App\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\ContractReportByPropertyRequest;
+use App\Http\Requests\Api\App\V1\ContractReportChartRequest;
 use App\Http\Requests\Api\App\V1\ContractReportExpiringRequest;
 use App\Http\Requests\Api\App\V1\ContractReportSummaryRequest;
 use App\Http\Resources\App\V1\ContractExpiringReportResource;
+use App\Http\Resources\App\V1\ContractChartBucketResource;
 use App\Http\Resources\App\V1\ContractPropertyReportResource;
 use App\Models\Tenant\User as TenantUser;
 use App\Services\V1\ContractReportService;
@@ -57,6 +59,23 @@ class ContractReportController extends Controller
                 'to' => $paginator->lastItem(),
                 'total' => $paginator->total(),
             ],
+        ]);
+    }
+
+    public function chart(ContractReportChartRequest $request)
+    {
+        $tenantUser = $this->resolveTenantUser();
+        if (!$tenantUser instanceof TenantUser) {
+            return $tenantUser;
+        }
+
+        $report = $this->contractReportService->chart($tenantUser, $request->validated());
+
+        return ApiResponse::success('Property contract chart retrieved successfully.', [
+            'filters' => $report['filters'],
+            'property' => $report['property'],
+            'summary' => $report['summary'],
+            'series' => ContractChartBucketResource::collection(collect($report['series']))->resolve(),
         ]);
     }
 
