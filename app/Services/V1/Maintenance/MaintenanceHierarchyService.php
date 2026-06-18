@@ -13,10 +13,16 @@ use Illuminate\Http\JsonResponse;
 
 class MaintenanceHierarchyService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private PropertyAssignmentAccessService $propertyAssignmentAccessService)
     {
     }
 
+    /**
+     * Resolve job hierarchy.
+     */
     public function resolveJobHierarchy(array $payload): array|JsonResponse
     {
         $property = Property::query()
@@ -87,6 +93,9 @@ class MaintenanceHierarchyService
         ];
     }
 
+    /**
+     * Resolve job hierarchy for update.
+     */
     public function resolveJobHierarchyForUpdate(MaintenanceJob $maintenanceJob, array $payload): array|JsonResponse
     {
         $propertyChanged = array_key_exists('property_uuid', $payload);
@@ -103,6 +112,9 @@ class MaintenanceHierarchyService
         ]);
     }
 
+    /**
+     * Handle ensure property access.
+     */
     public function ensurePropertyAccess(User $tenantUser, Property $property): ?JsonResponse
     {
         if ($this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $property->id)) {

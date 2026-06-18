@@ -27,6 +27,9 @@ class UnitController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
@@ -37,6 +40,9 @@ class UnitController extends Controller
     {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(UnitIndexRequest $request)
     {
         $this->authorize('viewAny', Unit::class);
@@ -55,7 +61,7 @@ class UnitController extends Controller
                 return ApiResponse::error('Property not found', ['property_uuid' => ['Invalid property identifier']], 422);
             }
 
-            /* Resolve floor IDs once — avoids nested whereHas subquery */
+            /* Resolve floor IDs once ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â avoids nested whereHas subquery */
             $floorIds = PropertyFloor::query()
                 ->where('property_id', $property->id)
                 ->pluck('id')
@@ -94,6 +100,9 @@ class UnitController extends Controller
         return ApiResponse::resource(UnitResource::collection($units), ApiMessages::listRetrieved('units'));
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreUnitRequest $request)
     {
         $this->authorize('create', Unit::class);
@@ -136,6 +145,9 @@ class UnitController extends Controller
         return ApiResponse::resource(new UnitResource($unit->load('propertyFloor.property')), ApiMessages::created('unit'), 201);
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(Unit $unit)
     {
         $this->authorize('view', $unit);
@@ -143,6 +155,9 @@ class UnitController extends Controller
         return ApiResponse::resource(new UnitResource($unit->load('propertyFloor.property')), ApiMessages::detailsRetrieved('unit'));
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateUnitRequest $request, Unit $unit)
     {
         $this->authorize('update', $unit);
@@ -200,6 +215,9 @@ class UnitController extends Controller
         return ApiResponse::resource(new UnitResource($unit->fresh()->load('propertyFloor.property')), ApiMessages::updated('unit'));
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(Unit $unit)
     {
         $this->authorize('delete', $unit);
@@ -217,6 +235,9 @@ class UnitController extends Controller
         return ApiResponse::success(ApiMessages::deleted('unit'));
     }
 
+    /**
+     * Sync workspace usage.
+     */
     private function syncWorkspaceUsage(array $propertyIds = []): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -230,6 +251,9 @@ class UnitController extends Controller
         }
     }
 
+    /**
+     * Prepare inventory mutation.
+     */
     private function prepareInventoryMutation(bool $captureUsageBaseline = false): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -242,6 +266,9 @@ class UnitController extends Controller
         }
     }
 
+    /**
+     * Capture usage baseline.
+     */
     private function captureUsageBaseline(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -251,6 +278,9 @@ class UnitController extends Controller
         }
     }
 
+    /**
+     * Assert property allows operational mutation.
+     */
     private function assertPropertyAllowsOperationalMutation(Property $property, string $moduleName): ?\Illuminate\Http\JsonResponse
     {
         $tenant = request()->attributes->get('tenant');

@@ -10,11 +10,17 @@ use InvalidArgumentException;
 
 class CustomerContractAutomationService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private TenantConnectionManager $tenantConnectionManager,
     ) {
     }
 
+    /**
+     * Sync ready tenants.
+     */
     public function syncReadyTenants(?string $tenantUuid = null, int $chunk = 20): int
     {
         $chunk = max($chunk, 1);
@@ -39,6 +45,9 @@ class CustomerContractAutomationService
         return $updatedRows;
     }
 
+    /**
+     * Sync tenant.
+     */
     public function syncTenant(Tenant $tenant): int
     {
         $this->assertTenantReady($tenant);
@@ -100,6 +109,9 @@ class CustomerContractAutomationService
         });
     }
 
+    /**
+     * Run in tenant context.
+     */
     private function runInTenantContext(Tenant $tenant, callable $callback): mixed
     {
         $currentTenant = Tenant::current();
@@ -112,6 +124,9 @@ class CustomerContractAutomationService
         }
     }
 
+    /**
+     * Assert tenant ready.
+     */
     private function assertTenantReady(Tenant $tenant): void
     {
         if ($tenant->provisioning_status !== 'ready' || empty($tenant->database)) {

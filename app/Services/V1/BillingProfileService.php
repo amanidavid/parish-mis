@@ -11,6 +11,9 @@ use Illuminate\Database\Eloquent\Collection;
 
 class BillingProfileService
 {
+    /**
+     * Handle assign profile to workspace.
+     */
     public function assignProfileToWorkspace(Tenant $tenant, BillingProfile $profile): void
     {
         $meta = $tenant->meta ?? [];
@@ -36,6 +39,9 @@ class BillingProfileService
         }
     }
 
+    /**
+     * Handle matching rule.
+     */
     public function matchingRule(BillingProfile $profile, int $registeredUnits, CarbonInterface|string|null $date = null): ?BillingRule
     {
         return $this->matchingRuleFromCollection(
@@ -44,6 +50,9 @@ class BillingProfileService
         );
     }
 
+    /**
+     * Determine whether has overlapping rule.
+     */
     public function hasOverlappingRule(BillingProfile $profile, array $payload, ?int $ignoreRuleId = null): bool
     {
         $rangeStart = (int) $payload['range_start'];
@@ -98,6 +107,9 @@ class BillingProfileService
             ->exists();
     }
 
+    /**
+     * Handle active rules for date.
+     */
     public function activeRulesForDate(BillingProfile $profile, CarbonInterface|string|null $date = null): Collection
     {
         $date = $date instanceof CarbonInterface ? $date->toDateString() : ($date ?: now()->toDateString());
@@ -128,6 +140,9 @@ class BillingProfileService
             ->get();
     }
 
+    /**
+     * Handle matching rule from collection.
+     */
     public function matchingRuleFromCollection(Collection $rules, int $registeredUnits): ?BillingRule
     {
         return $rules->first(function (BillingRule $rule) use ($registeredUnits) {

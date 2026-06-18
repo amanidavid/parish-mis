@@ -27,6 +27,9 @@ class SubscriptionBillingProfileChangeService
     /** An older pending change replaced by a newer request. */
     public const STATUS_SUPERSEDED = 'superseded';
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private BillingProrationService $billingProrationService,
@@ -36,6 +39,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Build a dry-run summary so callers can see pricing and proration before saving a change. */
+    /**
+     * Handle the preview request.
+     */
     public function preview(Tenant $tenant, BillingProfile $newProfile, array $payload = []): array
     {
         $subscription = $this->subscriptionService->currentSubscription($tenant);
@@ -85,6 +91,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Persist a billing profile change and apply it immediately or schedule it for the next cycle. */
+    /**
+     * Handle the apply request.
+     */
     public function apply(Tenant $tenant, BillingProfile $newProfile, array $payload = []): Subscription
     {
         return DB::connection('base')->transaction(function () use ($tenant, $newProfile, $payload) {
@@ -142,6 +151,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Promote a pending next-cycle change once its effective timestamp has arrived. */
+    /**
+     * Apply due pending change if needed.
+     */
     public function applyDuePendingChangeIfNeeded(Tenant $tenant): ?SubscriptionProfileChange
     {
         return DB::connection('base')->transaction(function () use ($tenant) {
@@ -182,6 +194,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Return the latest pending change so summary endpoints can show what will happen next. */
+    /**
+     * Handle pending change for subscription.
+     */
     public function pendingChangeForSubscription(Subscription $subscription): ?SubscriptionProfileChange
     {
         return SubscriptionProfileChange::query()
@@ -194,6 +209,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Retire older pending changes so one subscription has a single source of future truth. */
+    /**
+     * Supersede pending changes.
+     */
     private function supersedePendingChanges(Subscription $subscription): void
     {
         SubscriptionProfileChange::query()
@@ -203,6 +221,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Write the new billing profile to both tenant metadata and the live subscription record. */
+    /**
+     * Apply profile to workspace.
+     */
     private function applyProfileToWorkspace(Tenant $tenant, Subscription $subscription, BillingProfile $profile): void
     {
         $tenantMeta = $tenant->meta ?? [];
@@ -220,6 +241,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Calculate the immediate mid-cycle charge or credit using inclusive remaining-day proration. */
+    /**
+     * Calculate proration.
+     */
     private function calculateProration(
         Subscription $subscription,
         array $state,
@@ -240,6 +264,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Enforce the supported change timing options before any billing workflow runs. */
+    /**
+     * Normalize timing.
+     */
     private function normalizeTiming(?string $timing): string
     {
         $timing = $timing ?: self::TIMING_IMMEDIATE_PRORATED;
@@ -252,6 +279,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Resolve when the new billing profile should take effect for immediate and scheduled changes. */
+    /**
+     * Resolve effective at.
+     */
     private function resolveEffectiveAt(?string $effectiveAt, string $timing, array $state): Carbon
     {
         if ($timing === self::TIMING_NEXT_CYCLE) {
@@ -268,6 +298,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Shape a billing profile into a lightweight response payload for previews and summaries. */
+    /**
+     * Format profile.
+     */
     private function formatProfile(?BillingProfile $profile): ?array
     {
         if (!$profile) {
@@ -284,6 +317,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Shape a stored change record into a stable API payload for pending/applied change displays. */
+    /**
+     * Format change.
+     */
     private function formatChange(SubscriptionProfileChange $change): array
     {
         return [
@@ -301,6 +337,9 @@ class SubscriptionBillingProfileChangeService
     }
 
     /** Keep service responses on the same datetime format used by the rest of the billing APIs. */
+    /**
+     * Format date time.
+     */
     private function formatDateTime(CarbonInterface|string|null $value): ?string
     {
         if (!$value) {

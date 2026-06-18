@@ -13,10 +13,16 @@ class MaintenanceReportService
 {
     private const MAX_PER_PAGE = 100;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(private PropertyAssignmentAccessService $propertyAssignmentAccessService)
     {
     }
 
+    /**
+     * Handle the summary request.
+     */
     public function summary(User $tenantUser, array $filters = []): array
     {
         $scope = $this->resolveScope($tenantUser);
@@ -57,6 +63,9 @@ class MaintenanceReportService
         ];
     }
 
+    /**
+     * Handle the by property request.
+     */
     public function byProperty(User $tenantUser, array $filters = []): LengthAwarePaginator
     {
         $scope = $this->resolveScope($tenantUser);
@@ -84,6 +93,9 @@ class MaintenanceReportService
         return $query->paginate($perPage)->withQueryString();
     }
 
+    /**
+     * Handle recent expenses.
+     */
     public function recentExpenses(User $tenantUser, array $filters = []): LengthAwarePaginator
     {
         $scope = $this->resolveScope($tenantUser);
@@ -130,6 +142,9 @@ class MaintenanceReportService
         return $query->paginate($perPage)->withQueryString();
     }
 
+    /**
+     * Expenses base query.
+     */
     private function expensesBaseQuery(array $scope, array $filters, bool $applyDateWindow = true): QueryBuilder
     {
         $query = $this->tenantTable('maintenance_expenses')
@@ -170,6 +185,9 @@ class MaintenanceReportService
         return $query;
     }
 
+    /**
+     * Resolve scope.
+     */
     private function resolveScope(User $tenantUser): array
     {
         return [
@@ -178,6 +196,9 @@ class MaintenanceReportService
         ];
     }
 
+    /**
+     * Apply property scope to column.
+     */
     private function applyPropertyScopeToColumn(QueryBuilder $query, array $scope, string $propertyColumn): QueryBuilder
     {
         if ($scope['bypass'] === true) {
@@ -192,6 +213,9 @@ class MaintenanceReportService
         });
     }
 
+    /**
+     * Apply by property sort.
+     */
     private function applyByPropertySort(QueryBuilder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -207,6 +231,9 @@ class MaintenanceReportService
         };
     }
 
+    /**
+     * Apply recent sort.
+     */
     private function applyRecentSort(QueryBuilder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -222,11 +249,17 @@ class MaintenanceReportService
         };
     }
 
+    /**
+     * Tenant table.
+     */
     private function tenantTable(string $table): QueryBuilder
     {
         return DB::connection($this->tenantConnectionName())->table($table);
     }
 
+    /**
+     * Tenant connection name.
+     */
     private function tenantConnectionName(): string
     {
         return (string) config('multitenancy.tenant_database_connection_name', 'tenant');

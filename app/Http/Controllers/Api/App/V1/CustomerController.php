@@ -23,12 +23,18 @@ class CustomerController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private CustomerContractRuleService $ruleService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     ) {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(CustomerIndexRequest $request)
     {
         $this->authorize('viewAny', Customer::class);
@@ -83,6 +89,9 @@ class CustomerController extends Controller
         return ApiResponse::resource(CustomerResource::collection($customers), ApiMessages::listRetrieved('customers'));
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreCustomerRequest $request)
     {
         $this->authorize('create', Customer::class);
@@ -125,6 +134,9 @@ class CustomerController extends Controller
         );
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(Customer $customer)
     {
         $this->authorize('view', $customer);
@@ -135,6 +147,9 @@ class CustomerController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateCustomerRequest $request, Customer $customer)
     {
         $this->authorize('update', $customer);
@@ -198,6 +213,9 @@ class CustomerController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(Customer $customer)
     {
         $this->authorize('delete', $customer);
@@ -207,6 +225,9 @@ class CustomerController extends Controller
         return ApiResponse::success(ApiMessages::deleted('customer'));
     }
 
+    /**
+     * Ensure user can access property.
+     */
     private function ensureUserCanAccessProperty(Property $property): ?\Illuminate\Http\JsonResponse
     {
         $tenantUser = request()->user();
@@ -219,6 +240,9 @@ class CustomerController extends Controller
         return null;
     }
 
+    /**
+     * Sync business detail.
+     */
     private function syncBusinessDetail(Customer $customer, ?array $businessDetail): void
     {
         if ($customer->customer_type !== 'business') {
@@ -239,6 +263,9 @@ class CustomerController extends Controller
         ]);
     }
 
+    /**
+     * Normalize display name.
+     */
     private function normalizeDisplayName(?string $value): ?string
     {
         $value = Str::of((string) $value)->trim()->squish()->toString();
@@ -246,6 +273,9 @@ class CustomerController extends Controller
         return $value !== '' ? $value : null;
     }
 
+    /**
+     * Normalize email.
+     */
     private function normalizeEmail(?string $value): ?string
     {
         $value = trim((string) $value);
@@ -253,6 +283,9 @@ class CustomerController extends Controller
         return $value !== '' ? Str::lower($value) : null;
     }
 
+    /**
+     * Normalize phone.
+     */
     private function normalizePhone(?string $value): ?string
     {
         $value = preg_replace('/[^0-9+]/', '', (string) $value);
@@ -260,6 +293,9 @@ class CustomerController extends Controller
         return $value !== '' ? $value : null;
     }
 
+    /**
+     * Normalize business code.
+     */
     private function normalizeBusinessCode(?string $value): ?string
     {
         $value = trim((string) $value);

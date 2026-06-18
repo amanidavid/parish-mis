@@ -30,6 +30,9 @@ class SubscriptionService
     /** Only these subscription states are considered open for provisioning-time reuse. */
     private const OPEN_SUBSCRIPTION_STATUSES = ['trialing', 'active'];
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private BillingProfileService $billingProfileService,
         private TenantConnectionManager $tenantConnectionManager
@@ -38,6 +41,9 @@ class SubscriptionService
     }
 
     /** Create the first workspace subscription during provisioning and seed the starting usage rows. */
+    /**
+     * Create trial subscription for tenant.
+     */
     public function createTrialSubscriptionForTenant(Tenant $tenant, ?string $planUuid = null): Subscription
     {
         $plan = $this->resolveOnboardingPlan($planUuid);
@@ -108,6 +114,9 @@ class SubscriptionService
     }
 
     /** Refresh the current workspace usage counters that billing summaries and guards depend on. */
+    /**
+     * Sync workspace usage.
+     */
     public function syncWorkspaceUsage(Tenant $tenant): array
     {
         $counts = $this->runInTenantContext($tenant, fn () => $this->calculateUsageSummary(null));
@@ -125,6 +134,9 @@ class SubscriptionService
     }
 
     /** Build the tenant/admin subscription summary, including any pending billing profile change. */
+    /**
+     * Get workspace subscription summary.
+     */
     public function getWorkspaceSubscriptionSummary(Tenant $tenant): array
     {
         $subscription = $this->currentSubscription($tenant);
@@ -240,6 +252,9 @@ class SubscriptionService
     }
 
     /** Return the paginated per-property billing estimate breakdown for drill-down screens. */
+    /**
+     * Get workspace subscription property breakdown.
+     */
     public function getWorkspaceSubscriptionPropertyBreakdown(Tenant $tenant, array $filters = []): LengthAwarePaginator
     {
         return $this->runInTenantContext($tenant, function () use ($tenant, $filters) {
@@ -293,6 +308,9 @@ class SubscriptionService
     }
 
     /** Fetch the latest subscription record that represents the workspace's current billing state. */
+    /**
+     * Handle current subscription.
+     */
     public function currentSubscription(Tenant $tenant): ?Subscription
     {
         return Subscription::query()
@@ -303,6 +321,9 @@ class SubscriptionService
     }
 
     /** Change subscription lifecycle status and recalculate period anchors for that status. */
+    /**
+     * Update subscription status.
+     */
     public function updateSubscriptionStatus(Tenant $tenant, array|string $payload): ?Subscription
     {
         $attributes = is_array($payload) ? $payload : ['status' => $payload];
@@ -339,6 +360,9 @@ class SubscriptionService
     }
 
     /** Block inventory mutations when the workspace billing state does not allow operational changes. */
+    /**
+     * Assert workspace allows inventory mutation.
+     */
     public function assertWorkspaceAllowsInventoryMutation(Tenant $tenant): void
     {
         $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
@@ -358,6 +382,9 @@ class SubscriptionService
         }
     }
 
+    /**
+     * Resolve onboarding plan.
+     */
     private function resolveOnboardingPlan(?string $planUuid = null): Plan
     {
         $activePlans = Plan::query()->where('status', 'active');
@@ -391,8 +418,7 @@ class SubscriptionService
     }
 
     /**
-     * Single tenant DB round-trip: derive property count, unit total, and estimated price
-     * all from the same grouped frequencies query — replaces the previous 3 separate queries.
+     * Calculate usage summary.
      */
     private function calculateUsageSummary(?BillingProfile $billingProfile): array
     {
@@ -412,6 +438,9 @@ class SubscriptionService
     }
 
     /** @deprecated Use calculateUsageSummary() which runs a single query instead of two. */
+    /**
+     * Calculate workspace inventory totals.
+     */
     private function calculateWorkspaceInventoryTotals(): array
     {
         return [
@@ -421,6 +450,9 @@ class SubscriptionService
     }
 
     /** Reuse grouped property usage to estimate the total billing amount without scanning each property repeatedly. */
+    /**
+     * Handle estimate total price from frequencies.
+     */
     public function estimateTotalPriceFromFrequencies(Collection $frequencies, ?BillingProfile $billingProfile, CarbonInterface|string|null $date = null): int
     {
         if (!$billingProfile) {
@@ -437,11 +469,17 @@ class SubscriptionService
     }
 
     /** Aggregate workspace properties by registered-unit bucket so pricing can be calculated efficiently. */
+    /**
+     * Get workspace property usage frequencies.
+     */
     public function getWorkspacePropertyUsageFrequencies(Tenant $tenant): Collection
     {
         return $this->runInTenantContext($tenant, fn () => $this->propertyRegisteredUnitFrequencies());
     }
 
+    /**
+     * Get workspace property pricing snapshot.
+     */
     public function getWorkspacePropertyPricingSnapshot(
         Tenant $tenant,
         ?BillingProfile $billingProfile = null,
@@ -476,6 +514,9 @@ class SubscriptionService
     }
 
     /** Resolve the billing profile currently governing the workspace, falling back to the active default profile. */
+    /**
+     * Resolve workspace billing profile.
+     */
     public function resolveWorkspaceBillingProfile(Tenant $tenant): ?BillingProfile
     {
         $billingProfileUuid = data_get($tenant->meta, 'billing_profile_uuid');
@@ -495,6 +536,9 @@ class SubscriptionService
     }
 
     /** Convert the raw subscription row into an effective state the rest of the app can reason about. */
+    /**
+     * Resolve subscription state.
+     */
     public function resolveSubscriptionState(?Subscription $subscription): array
     {
         if (!$subscription) {
@@ -552,6 +596,9 @@ class SubscriptionService
         ];
     }
 
+    /**
+     * Property registered unit frequencies.
+     */
     private function propertyRegisteredUnitFrequencies(): Collection
     {
         $propertyUsage = Property::query()
@@ -573,6 +620,9 @@ class SubscriptionService
             ->get();
     }
 
+    /**
+     * Property usage query.
+     */
     private function propertyUsageQuery(): Builder
     {
         return Property::query()
@@ -589,6 +639,9 @@ class SubscriptionService
             ->groupBy('properties.id', 'properties.uuid', 'properties.name', 'properties.status', 'properties.created_at');
     }
 
+    /**
+     * Apply property breakdown sort.
+     */
     private function applyPropertyBreakdownSort(Builder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -602,6 +655,9 @@ class SubscriptionService
         };
     }
 
+    /**
+     * Update usage metric.
+     */
     private function updateUsageMetric(int $tenantId, string $metric, int $quantity, Carbon $now, array $meta = []): void
     {
         SubscriptionUsage::query()->updateOrCreate([
@@ -616,6 +672,9 @@ class SubscriptionService
         ]);
     }
 
+    /**
+     * Determine workspace access state.
+     */
     private function determineWorkspaceAccessState(Tenant $tenant, array $subscriptionState): array
     {
         if ($tenant->status === 'suspended') {
@@ -666,6 +725,9 @@ class SubscriptionService
         };
     }
 
+    /**
+     * Calculate trial ends at.
+     */
     private function calculateTrialEndsAt(CarbonInterface|string $startsAt, int $trialDays): Carbon
     {
         $startsAt = $this->normalizeDateAnchor($startsAt);
@@ -674,6 +736,9 @@ class SubscriptionService
         return $startsAt->copy()->addDays($inclusiveDays)->endOfDay();
     }
 
+    /**
+     * Calculate billing ends at.
+     */
     private function calculateBillingEndsAt(CarbonInterface|string $startsAt, string $billingInterval): Carbon
     {
         $startsAt = $this->normalizeDateAnchor($startsAt);
@@ -685,6 +750,9 @@ class SubscriptionService
         };
     }
 
+    /**
+     * Resolve effective at.
+     */
     private function resolveEffectiveAt(?string $value = null): Carbon
     {
         return $value !== null
@@ -692,6 +760,9 @@ class SubscriptionService
             : now()->startOfDay();
     }
 
+    /**
+     * Normalize date anchor.
+     */
     private function normalizeDateAnchor(CarbonInterface|string $value): Carbon
     {
         return $value instanceof CarbonInterface
@@ -699,11 +770,17 @@ class SubscriptionService
             : Carbon::parse($value)->startOfDay();
     }
 
+    /**
+     * Format date time.
+     */
     private function formatDateTime(?CarbonInterface $value): ?string
     {
         return $value?->format('Y-m-d H:i:s');
     }
 
+    /**
+     * Run in tenant context.
+     */
     private function runInTenantContext(Tenant $tenant, callable $callback): mixed
     {
         $currentTenant = Tenant::current();
@@ -725,11 +802,17 @@ class SubscriptionService
         }
     }
 
+    /**
+     * Tenant query.
+     */
     private function tenantQuery(): \Illuminate\Database\Query\Builder
     {
         return DB::connection($this->tenantConnectionName())->query();
     }
 
+    /**
+     * Tenant connection name.
+     */
     private function tenantConnectionName(): string
     {
         return $this->tenantConnectionManager->connectionName();

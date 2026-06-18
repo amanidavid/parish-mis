@@ -13,6 +13,9 @@ class PlatformOverviewService
 
     private const RECENT_WORKSPACES_LIMIT = 10;
 
+    /**
+     * Handle the overview request.
+     */
     public function overview(): array
     {
         return Cache::remember(
@@ -22,6 +25,9 @@ class PlatformOverviewService
         );
     }
 
+    /**
+     * Build overview.
+     */
     private function buildOverview(): array
     {
         $tenantOverview = DB::connection('base')

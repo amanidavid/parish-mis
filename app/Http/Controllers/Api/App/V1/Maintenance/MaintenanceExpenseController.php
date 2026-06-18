@@ -28,6 +28,9 @@ class MaintenanceExpenseController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
@@ -35,6 +38,9 @@ class MaintenanceExpenseController extends Controller
     ) {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(MaintenanceExpenseIndexRequest $request)
     {
         $this->authorize('viewAny', MaintenanceExpense::class);
@@ -107,6 +113,9 @@ class MaintenanceExpenseController extends Controller
         return ApiResponse::resource(MaintenanceExpenseResource::collection($expenses), ApiMessages::listRetrieved('maintenance_expenses'));
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreMaintenanceExpenseRequest $request)
     {
         $this->authorize('create', MaintenanceExpense::class);
@@ -151,6 +160,9 @@ class MaintenanceExpenseController extends Controller
         );
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(MaintenanceExpense $maintenanceExpense)
     {
         $this->authorize('view', $maintenanceExpense);
@@ -161,6 +173,9 @@ class MaintenanceExpenseController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateMaintenanceExpenseRequest $request, MaintenanceExpense $maintenanceExpense)
     {
         $this->authorize('update', $maintenanceExpense);
@@ -206,6 +221,9 @@ class MaintenanceExpenseController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(MaintenanceExpense $maintenanceExpense)
     {
         $this->authorize('delete', $maintenanceExpense);
@@ -221,6 +239,9 @@ class MaintenanceExpenseController extends Controller
         return ApiResponse::success(ApiMessages::deleted('maintenance_expense'));
     }
 
+    /**
+     * Resolve maintenance job by uuid.
+     */
     private function resolveMaintenanceJobByUuid(string $uuid): ?MaintenanceJob
     {
         return MaintenanceJob::query()
@@ -229,6 +250,9 @@ class MaintenanceExpenseController extends Controller
             ->first();
     }
 
+    /**
+     * Reload maintenance expense.
+     */
     private function reloadMaintenanceExpense(MaintenanceExpense $maintenanceExpense): MaintenanceExpense
     {
         return MaintenanceExpense::query()
@@ -241,11 +265,17 @@ class MaintenanceExpenseController extends Controller
             ->findOrFail($maintenanceExpense->id);
     }
 
+    /**
+     * Normalize title.
+     */
     private function normalizeTitle(string $value): string
     {
         return Str::of($value)->trim()->squish()->ucfirst()->toString();
     }
 
+    /**
+     * Normalize description.
+     */
     private function normalizeDescription(?string $value): ?string
     {
         $normalized = Str::of((string) $value)->trim()->squish()->toString();
@@ -253,6 +283,9 @@ class MaintenanceExpenseController extends Controller
         return $normalized !== '' ? $normalized : null;
     }
 
+    /**
+     * Apply index sort.
+     */
     private function applyIndexSort(\Illuminate\Database\Eloquent\Builder $query, ?string $sort): void
     {
         $direction = str_starts_with((string) $sort, '-') ? 'desc' : 'asc';
@@ -267,6 +300,9 @@ class MaintenanceExpenseController extends Controller
         };
     }
 
+    /**
+     * Assert workspace allows inventory mutation.
+     */
     private function assertWorkspaceAllowsInventoryMutation(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -276,6 +312,9 @@ class MaintenanceExpenseController extends Controller
         }
     }
 
+    /**
+     * Assert property allows maintenance.
+     */
     private function assertPropertyAllowsMaintenance(Property $property): ?\Illuminate\Http\JsonResponse
     {
         $tenant = request()->attributes->get('tenant');

@@ -11,6 +11,9 @@ use Spatie\Permission\PermissionRegistrar;
 
 class PermissionService
 {
+    /**
+     * Handle find by ids.
+     */
     public function findByIds(array $ids)
     {
         return Permission::query()
@@ -21,6 +24,9 @@ class PermissionService
             ->get();
     }
 
+    /**
+     * Create permission.
+     */
     public function createPermission(string $name): Permission
     {
         $normalized = trim($name);
@@ -46,6 +52,9 @@ class PermissionService
     }
 
     /** Create or update an API role and optionally attach the provided permissions in one transaction. */
+    /**
+     * Create role.
+     */
     public function createRole(string $name, array $permissionIds = []): Role
     {
         return DB::connection((new Role())->getConnectionName())->transaction(function () use ($name, $permissionIds) {
@@ -81,6 +90,9 @@ class PermissionService
     }
 
     /** Delete an API role, clear its assignments, and remove only permissions that become fully orphaned. */
+    /**
+     * Handle delete role.
+     */
     public function deleteRole(int $roleId): void
     {
         $connection = (new Role())->getConnectionName();
@@ -118,6 +130,9 @@ class PermissionService
         });
     }
 
+    /**
+     * Handle backfill modules.
+     */
     public function backfillModules(): void
     {
         Permission::query()->select(['id', 'name'])->chunkById(100, function ($permissions) {

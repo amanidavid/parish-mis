@@ -17,12 +17,18 @@ use InvalidArgumentException;
 
 class SubscriptionUsageAdjustmentService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private BillingProrationService $billingProrationService,
     ) {
     }
 
+    /**
+     * Handle prepare inventory mutation.
+     */
     public function prepareInventoryMutation(Tenant $tenant): void
     {
         $context = $this->resolveBillableContext($tenant);
@@ -39,6 +45,9 @@ class SubscriptionUsageAdjustmentService
         );
     }
 
+    /**
+     * Handle preview current adjustment.
+     */
     public function previewCurrentAdjustment(Tenant $tenant): array
     {
         $subscription = $this->subscriptionService->currentSubscription($tenant);
@@ -128,6 +137,9 @@ class SubscriptionUsageAdjustmentService
         ];
     }
 
+    /**
+     * Sync pending adjustment.
+     */
     public function syncPendingAdjustment(Tenant $tenant): ?SubscriptionUsageAdjustment
     {
         $preview = $this->previewCurrentAdjustment($tenant);
@@ -198,6 +210,9 @@ class SubscriptionUsageAdjustmentService
         });
     }
 
+    /**
+     * List adjustments.
+     */
     public function listAdjustments(Tenant $tenant, array $filters = []): LengthAwarePaginator
     {
         $query = SubscriptionUsageAdjustment::query()
@@ -229,6 +244,9 @@ class SubscriptionUsageAdjustmentService
             ->withQueryString();
     }
 
+    /**
+     * Apply adjustment.
+     */
     public function applyAdjustment(Tenant $tenant, SubscriptionUsageAdjustment $adjustment): SubscriptionUsageAdjustment
     {
         return DB::connection('base')->transaction(function () use ($tenant, $adjustment) {
@@ -265,6 +283,9 @@ class SubscriptionUsageAdjustmentService
         });
     }
 
+    /**
+     * Handle waive adjustment.
+     */
     public function waiveAdjustment(Tenant $tenant, SubscriptionUsageAdjustment $adjustment): SubscriptionUsageAdjustment
     {
         return DB::connection('base')->transaction(function () use ($tenant, $adjustment) {
@@ -301,6 +322,9 @@ class SubscriptionUsageAdjustmentService
         });
     }
 
+    /**
+     * Handle reset current cycle baseline to current usage.
+     */
     public function resetCurrentCycleBaselineToCurrentUsage(Tenant $tenant): ?SubscriptionUsageBaseline
     {
         $context = $this->resolveBillableContext($tenant);
@@ -346,6 +370,9 @@ class SubscriptionUsageAdjustmentService
         return $baseline->fresh();
     }
 
+    /**
+     * Handle pending adjustment for subscription.
+     */
     public function pendingAdjustmentForSubscription(
         Subscription $subscription,
         CarbonInterface|string|null $periodStartsAt = null
@@ -364,6 +391,9 @@ class SubscriptionUsageAdjustmentService
             ->first();
     }
 
+    /**
+     * Resolve billable context.
+     */
     private function resolveBillableContext(Tenant $tenant): ?array
     {
         $subscription = $this->subscriptionService->currentSubscription($tenant);
@@ -390,6 +420,9 @@ class SubscriptionUsageAdjustmentService
         ];
     }
 
+    /**
+     * Ensure current cycle baseline.
+     */
     private function ensureCurrentCycleBaseline(
         Tenant $tenant,
         Subscription $subscription,
@@ -435,6 +468,9 @@ class SubscriptionUsageAdjustmentService
         });
     }
 
+    /**
+     * Baseline for period.
+     */
     private function baselineForPeriod(
         int $subscriptionId,
         CarbonInterface|string $periodStartsAt,
@@ -451,6 +487,9 @@ class SubscriptionUsageAdjustmentService
         return $query->first();
     }
 
+    /**
+     * Supersede adjustments.
+     */
     private function supersedeAdjustments(int $subscriptionId, ?CarbonInterface $periodStartsAt): void
     {
         if (!$periodStartsAt) {
@@ -467,6 +506,9 @@ class SubscriptionUsageAdjustmentService
             ]);
     }
 
+    /**
+     * Advance baseline.
+     */
     private function advanceBaseline(
         SubscriptionUsageBaseline $baseline,
         SubscriptionUsageAdjustment $adjustment
@@ -482,6 +524,9 @@ class SubscriptionUsageAdjustmentService
         ])->save();
     }
 
+    /**
+     * Summarize frequencies.
+     */
     private function summarizeFrequencies(array $frequencies): array
     {
         $propertiesCount = 0;
@@ -500,6 +545,9 @@ class SubscriptionUsageAdjustmentService
         ];
     }
 
+    /**
+     * Normalize frequencies.
+     */
     private function normalizeFrequencies(Collection $frequencies): array
     {
         return $frequencies
@@ -512,6 +560,9 @@ class SubscriptionUsageAdjustmentService
             ->all();
     }
 
+    /**
+     * Empty preview.
+     */
     private function emptyPreview(
         Tenant $tenant,
         ?Subscription $subscription,
@@ -543,6 +594,9 @@ class SubscriptionUsageAdjustmentService
         ];
     }
 
+    /**
+     * Resolve billing profile id.
+     */
     private function resolveBillingProfileId(?array $billingProfile): ?int
     {
         $uuid = $billingProfile['uuid'] ?? null;
@@ -556,6 +610,9 @@ class SubscriptionUsageAdjustmentService
             ->value('id');
     }
 
+    /**
+     * Matches preview.
+     */
     private function matchesPreview(SubscriptionUsageAdjustment $adjustment, array $preview): bool
     {
         return (int) $adjustment->baseline_amount_cents === (int) data_get($preview, 'baseline.amount_cents', 0)
@@ -566,6 +623,9 @@ class SubscriptionUsageAdjustmentService
             && (array) ($adjustment->current_frequencies ?? []) === (array) data_get($preview, 'current.frequencies', []);
     }
 
+    /**
+     * Format billing profile.
+     */
     private function formatBillingProfile(?BillingProfile $billingProfile): ?array
     {
         if (!$billingProfile) {
@@ -581,6 +641,9 @@ class SubscriptionUsageAdjustmentService
         ];
     }
 
+    /**
+     * Format adjustment summary.
+     */
     private function formatAdjustmentSummary(SubscriptionUsageAdjustment $adjustment): array
     {
         return [
@@ -595,6 +658,9 @@ class SubscriptionUsageAdjustmentService
         ];
     }
 
+    /**
+     * Format date time.
+     */
     private function formatDateTime(CarbonInterface|string|null $value): ?string
     {
         if (!$value) {

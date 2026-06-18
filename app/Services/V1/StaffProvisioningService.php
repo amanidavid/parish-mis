@@ -14,6 +14,9 @@ use Illuminate\Support\Str;
 
 class StaffProvisioningService
 {
+    /**
+     * Create tenant staff.
+     */
     public function createTenantStaff(Tenant $tenant, array $data): array
     {
         $password = $data['password'] ?? $this->generateTemporaryPassword();
@@ -96,6 +99,9 @@ class StaffProvisioningService
         ];
     }
 
+    /**
+     * Resolve role names.
+     */
     private function resolveRoleNames(array $roleNames): array
     {
         $normalized = collect($roleNames)
@@ -118,6 +124,9 @@ class StaffProvisioningService
         return $normalized;
     }
 
+    /**
+     * Guard against workspace staff conflicts.
+     */
     private function guardAgainstWorkspaceStaffConflicts(string $phone, ?string $email): void
     {
         $query = TenantUser::query()
@@ -132,6 +141,9 @@ class StaffProvisioningService
         }
     }
 
+    /**
+     * Resolve unique username.
+     */
     private function resolveUniqueUsername(?string $requestedUsername, string $name): string
     {
         $base = !empty($requestedUsername)
@@ -149,6 +161,9 @@ class StaffProvisioningService
         return $candidate;
     }
 
+    /**
+     * Generate temporary password.
+     */
     private function generateTemporaryPassword(int $length = 10): string
     {
         return Str::upper(Str::random(4)).random_int(1000, 9999).Str::lower(Str::random(max(2, $length - 8)));

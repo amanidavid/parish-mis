@@ -13,6 +13,9 @@ class CustomerContractRuleService
     public const OPEN_ENDED_CONTRACT_END_DATE = '9999-12-31';
     public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active'];
 
+    /**
+     * Handle find duplicate customer.
+     */
     public function findDuplicateCustomer(array $payload, int $propertyId, ?int $ignoreCustomerId = null): ?Customer
     {
         $query = Customer::query()
@@ -67,6 +70,9 @@ class CustomerContractRuleService
             ->first();
     }
 
+    /**
+     * Determine whether has overlapping unit contract.
+     */
     public function hasOverlappingUnitContract(int $unitId, string $startDate, ?string $endDate, ?int $ignoreContractId = null): bool
     {
         $query = CustomerContract::query()
@@ -85,6 +91,9 @@ class CustomerContractRuleService
         return $query->exists();
     }
 
+    /**
+     * Sync unit occupancy status.
+     */
     public function syncUnitOccupancyStatus(int $unitId): void
     {
         $today = Carbon::today()->toDateString();
@@ -107,6 +116,9 @@ class CustomerContractRuleService
             ]);
     }
 
+    /**
+     * Normalize .
+     */
     private function normalize(?string $value): ?string
     {
         $value = trim((string) $value);
@@ -114,6 +126,9 @@ class CustomerContractRuleService
         return $value !== '' ? mb_strtolower($value) : null;
     }
 
+    /**
+     * Normalize phone.
+     */
     private function normalizePhone(?string $value): ?string
     {
         $value = preg_replace('/[^0-9+]/', '', (string) $value);

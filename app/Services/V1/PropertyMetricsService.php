@@ -14,6 +14,9 @@ class PropertyMetricsService
         'renewed',
     ];
 
+    /**
+     * Handle for property.
+     */
     public function forProperty(int $propertyId): array
     {
         $row = DB::connection($this->tenantConnectionName())
@@ -49,6 +52,9 @@ class PropertyMetricsService
         ];
     }
 
+    /**
+     * Tenant connection name.
+     */
     private function tenantConnectionName(): string
     {
         return (string) config('multitenancy.tenant_database_connection_name', 'tenant');

@@ -20,6 +20,9 @@ class PropertySubscriptionService
 {
     private const WORKSPACE_REPORT_TOTALS_CACHE_TTL_SECONDS = 60;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
@@ -27,6 +30,9 @@ class PropertySubscriptionService
     ) {
     }
 
+    /**
+     * List tenant property subscriptions.
+     */
     public function listTenantPropertySubscriptions(Tenant $tenant, array $filters = []): LengthAwarePaginator
     {
         $this->workspacePropertyRegistryService->ensureTenantSynced($tenant);
@@ -66,6 +72,9 @@ class PropertySubscriptionService
             ->withQueryString();
     }
 
+    /**
+     * Get tenant property subscription.
+     */
     public function getTenantPropertySubscription(Tenant $tenant, string $propertyUuid): ?WorkspaceProperty
     {
         $workspaceProperty = $this->workspacePropertyRegistryService->resolveWorkspaceProperty($tenant, $propertyUuid);
@@ -88,6 +97,9 @@ class PropertySubscriptionService
         return $workspaceProperty;
     }
 
+    /**
+     * Handle preview payment.
+     */
     public function previewPayment(Tenant $tenant, array $payload): array
     {
         $workspaceProperty = $this->resolvePayableWorkspaceProperty($tenant, (string) $payload['property_uuid']);
@@ -148,6 +160,9 @@ class PropertySubscriptionService
         ];
     }
 
+    /**
+     * Handle record payment.
+     */
     public function recordPayment(Tenant $tenant, array $payload, ?object $adminUser = null): PropertySubscriptionPayment
     {
         $workspaceProperty = $this->resolvePayableWorkspaceProperty($tenant, (string) $payload['property_uuid']);
@@ -222,6 +237,9 @@ class PropertySubscriptionService
         });
     }
 
+    /**
+     * List payments.
+     */
     public function listPayments(Tenant $tenant, array $filters = []): LengthAwarePaginator
     {
         $query = PropertySubscriptionPayment::query()
@@ -258,6 +276,9 @@ class PropertySubscriptionService
             ->withQueryString();
     }
 
+    /**
+     * Handle payment collection summary.
+     */
     public function paymentCollectionSummary(array $filters = []): array
     {
         $query = PropertySubscriptionPayment::query();
@@ -309,6 +330,9 @@ class PropertySubscriptionService
         ];
     }
 
+    /**
+     * Handle workspace report.
+     */
     public function workspaceReport(array $filters = []): array
     {
         $paymentSummary = DB::connection('base')->table('property_subscription_payments')
@@ -396,6 +420,9 @@ class PropertySubscriptionService
         ];
     }
 
+    /**
+     * Handle expired properties report.
+     */
     public function expiredPropertiesReport(array $filters = []): LengthAwarePaginator
     {
         $query = DB::connection('base')->table('workspace_properties')
@@ -461,6 +488,9 @@ class PropertySubscriptionService
             ->withQueryString();
     }
 
+    /**
+     * Sync expired property subscriptions.
+     */
     public function syncExpiredPropertySubscriptions(): int
     {
         return PropertySubscription::query()
@@ -474,6 +504,9 @@ class PropertySubscriptionService
             ]);
     }
 
+    /**
+     * Resolve payable workspace property.
+     */
     private function resolvePayableWorkspaceProperty(Tenant $tenant, string $propertyUuid): WorkspaceProperty
     {
         $workspaceProperty = $this->workspacePropertyRegistryService->resolveWorkspaceProperty($tenant, $propertyUuid);
@@ -489,6 +522,9 @@ class PropertySubscriptionService
         return $workspaceProperty;
     }
 
+    /**
+     * Resolve billable rule.
+     */
     private function resolveBillableRule(string $billingRuleUuid, string $paymentDate): BillingRule
     {
         $paymentDate = Carbon::parse($paymentDate)->toDateString();
@@ -512,6 +548,9 @@ class PropertySubscriptionService
         return $billingRule;
     }
 
+    /**
+     * Resolve coverage.
+     */
     private function resolveCoverage(Tenant $tenant, ?PropertySubscription $subscription, CarbonInterface $paymentDate, int $monthsPaid): array
     {
         $paymentStart = Carbon::parse($paymentDate)->startOfDay();
@@ -543,6 +582,9 @@ class PropertySubscriptionService
         ];
     }
 
+    /**
+     * Format subscription.
+     */
     private function formatSubscription(?PropertySubscription $subscription): ?array
     {
         if (!$subscription) {
@@ -565,6 +607,9 @@ class PropertySubscriptionService
         ];
     }
 
+    /**
+     * Apply subscription status filter.
+     */
     private function applySubscriptionStatusFilter(EloquentBuilder $query, string $status, string $alias): void
     {
         match ($status) {
@@ -593,6 +638,9 @@ class PropertySubscriptionService
         };
     }
 
+    /**
+     * Apply tenant property subscription sort.
+     */
     private function applyTenantPropertySubscriptionSort(EloquentBuilder $query, ?string $sort): void
     {
         $sort = trim((string) $sort);
@@ -611,6 +659,9 @@ class PropertySubscriptionService
         };
     }
 
+    /**
+     * Apply payment sort.
+     */
     private function applyPaymentSort(EloquentBuilder $query, ?string $sort): void
     {
         $sort = trim((string) $sort);
@@ -631,6 +682,9 @@ class PropertySubscriptionService
         };
     }
 
+    /**
+     * Resolve active payment.
+     */
     private function resolveActivePayment(WorkspaceProperty $workspaceProperty): ?PropertySubscriptionPayment
     {
         return $workspaceProperty->payments()
@@ -643,6 +697,9 @@ class PropertySubscriptionService
             ->first();
     }
 
+    /**
+     * Cached workspace report totals.
+     */
     private function cachedWorkspaceReportTotals(array $filters, $paymentSummary, $propertySummary): object
     {
         $cacheKey = 'billing.workspace_report.totals.'.md5(json_encode([
@@ -677,6 +734,9 @@ class PropertySubscriptionService
         });
     }
 
+    /**
+     * Apply expired properties status filter.
+     */
     private function applyExpiredPropertiesStatusFilter($query, string $status): void
     {
         match ($status) {
@@ -699,6 +759,9 @@ class PropertySubscriptionService
         };
     }
 
+    /**
+     * Apply prefix search.
+     */
     private function applyPrefixSearch($query, string $column, string $search)
     {
         $search = trim($search);
@@ -714,11 +777,17 @@ class PropertySubscriptionService
         return $query->where($column, 'like', $search.'%');
     }
 
+    /**
+     * Uses postgres case sensitive like.
+     */
     private function usesPostgresCaseSensitiveLike(): bool
     {
         return DB::connection('base')->getDriverName() === 'pgsql';
     }
 
+    /**
+     * Payment relations.
+     */
     private function paymentRelations(): array
     {
         return [
@@ -729,6 +798,9 @@ class PropertySubscriptionService
         ];
     }
 
+    /**
+     * Apply workspace report sort.
+     */
     private function applyWorkspaceReportSort(EloquentBuilder $query, ?string $sort): void
     {
         $sort = trim((string) $sort);
@@ -748,6 +820,9 @@ class PropertySubscriptionService
         };
     }
 
+    /**
+     * Apply expired property sort.
+     */
     private function applyExpiredPropertySort($query, ?string $sort): void
     {
         $sort = trim((string) $sort);
@@ -762,6 +837,9 @@ class PropertySubscriptionService
         };
     }
 
+    /**
+     * Effective status expression.
+     */
     private function effectiveStatusExpression(string $alias): string
     {
         return "CASE
@@ -771,6 +849,9 @@ class PropertySubscriptionService
         END";
     }
 
+    /**
+     * Effective status order expression.
+     */
     private function effectiveStatusOrderExpression(string $alias, string $direction): string
     {
         $expression = $this->effectiveStatusExpression($alias);

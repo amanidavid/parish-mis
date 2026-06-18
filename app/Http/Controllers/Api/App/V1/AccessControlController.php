@@ -21,10 +21,16 @@ use App\Support\ApiResponse;
 
 class AccessControlController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private PermissionService $permissionService)
     {
     }
 
+    /**
+     * Handle the permissions request.
+     */
     public function permissions(PermissionIndexRequest $request)
     {
         $this->ensureAccessControlPermission();
@@ -57,6 +63,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(PermissionResource::collection($permissions), 'Permission list');
     }
 
+    /**
+     * Store permission.
+     */
     public function storePermission(StorePermissionRequest $request)
     {
         $this->ensureAccessControlPermission();
@@ -66,6 +75,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(new PermissionResource($permission), 'Permission created', 201);
     }
 
+    /**
+     * Handle the roles request.
+     */
     public function roles(RoleIndexRequest $request)
     {
         $this->ensureAccessControlPermission();
@@ -89,6 +101,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(RoleResource::collection($roles), 'Role list');
     }
 
+    /**
+     * Store role.
+     */
     public function storeRole(StoreRoleRequest $request)
     {
         $this->ensureAccessControlPermission();
@@ -101,6 +116,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(new RoleResource($role), 'Role created', 201);
     }
 
+    /**
+     * Handle show role.
+     */
     public function showRole(int $roleId)
     {
         $this->ensureAccessControlPermission();
@@ -113,6 +131,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(new RoleResource($role), 'Role details');
     }
 
+    /**
+     * Sync role permissions.
+     */
     public function syncRolePermissions(SyncRolePermissionsRequest $request, int $roleId)
     {
         $this->ensureAccessControlPermission();
@@ -130,6 +151,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(new RoleResource($role), 'Role permissions updated');
     }
 
+    /**
+     * Sync user direct permissions.
+     */
     public function syncUserDirectPermissions(SyncUserDirectPermissionsRequest $request, TenantUser $tenantUser)
     {
         $this->ensureAccessControlPermission();
@@ -150,6 +174,9 @@ class AccessControlController extends Controller
         return ApiResponse::resource(new TenantUserResource($tenantUser), 'User direct permissions updated');
     }
 
+    /**
+     * Handle destroy role.
+     */
     public function destroyRole(int $roleId)
     {
         $this->ensureAccessControlPermission();
@@ -159,6 +186,9 @@ class AccessControlController extends Controller
         return ApiResponse::success(ApiMessages::deleted('role'));
     }
 
+    /**
+     * Ensure access control permission.
+     */
     private function ensureAccessControlPermission(): void
     {
         $tenantUser = request()->user();

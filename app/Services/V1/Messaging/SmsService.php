@@ -12,16 +12,25 @@ use Throwable;
 
 class SmsService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private HttpFactory $http,
     ) {
     }
 
+    /**
+     * Determine whether enabled.
+     */
     public function isEnabled(): bool
     {
         return (bool) config('services.sms.enabled', false);
     }
 
+    /**
+     * Handle send text.
+     */
     public function sendText(string|array $recipients, string $message, ?string $senderId = null, array $context = [], ?string $reference = null): array
     {
         $this->assertConfigured();
@@ -58,6 +67,9 @@ class SmsService
         ];
     }
 
+    /**
+     * Request.
+     */
     private function request(): PendingRequest
     {
         $request = $this->http
@@ -81,6 +93,9 @@ class SmsService
         return $request;
     }
 
+    /**
+     * Throw if failed.
+     */
     private function throwIfFailed(Response $response): void
     {
         if ($response->successful()) {
@@ -92,6 +107,9 @@ class SmsService
         );
     }
 
+    /**
+     * Assert configured.
+     */
     private function assertConfigured(): void
     {
         if (!$this->isEnabled()) {
@@ -105,6 +123,9 @@ class SmsService
         }
     }
 
+    /**
+     * Normalize recipients.
+     */
     private function normalizeRecipients(string|array $recipients): array
     {
         $recipients = is_array($recipients) ? $recipients : [$recipients];
@@ -133,6 +154,9 @@ class SmsService
         return array_values(array_unique($normalized));
     }
 
+    /**
+     * Mask recipients.
+     */
     private function maskRecipients(array $recipients): array
     {
         return array_map(function (string $recipient) {
@@ -142,6 +166,9 @@ class SmsService
         }, $recipients);
     }
 
+    /**
+     * Response body summary.
+     */
     private function responseBodySummary(Response $response): array|string|null
     {
         $json = $response->json();
@@ -163,6 +190,9 @@ class SmsService
         return $body;
     }
 
+    /**
+     * Build reference.
+     */
     private function buildReference(): string
     {
         return 'sms-'.Str::lower(Str::random(12));

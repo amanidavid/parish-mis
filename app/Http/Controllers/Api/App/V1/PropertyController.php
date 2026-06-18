@@ -29,6 +29,9 @@ class PropertyController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
@@ -39,6 +42,9 @@ class PropertyController extends Controller
     {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(PropertyIndexRequest $request)
     {
         $this->authorize('viewAny', Property::class);
@@ -116,6 +122,9 @@ class PropertyController extends Controller
         return ApiResponse::resource(PropertyResource::collection($properties), 'Properties list');
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StorePropertyRequest $request)
     {
         $this->authorize('create', Property::class);
@@ -159,6 +168,9 @@ class PropertyController extends Controller
         return ApiResponse::resource(new PropertyResource($property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])->loadCount(['floors', 'units'])), 'Property created', 201);
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(Property $property)
     {
         $this->authorize('view', $property);
@@ -169,6 +181,9 @@ class PropertyController extends Controller
         );
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdatePropertyRequest $request, Property $property)
     {
         $this->authorize('update', $property);
@@ -254,6 +269,9 @@ class PropertyController extends Controller
         );
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(Property $property)
     {
         $this->authorize('delete', $property);
@@ -268,6 +286,9 @@ class PropertyController extends Controller
         return ApiResponse::success('Property deleted');
     }
 
+    /**
+     * Sync workspace usage.
+     */
     private function syncWorkspaceUsage(): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -278,6 +299,9 @@ class PropertyController extends Controller
         }
     }
 
+    /**
+     * Prepare inventory mutation.
+     */
     private function prepareInventoryMutation(bool $captureUsageBaseline = false): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -290,6 +314,9 @@ class PropertyController extends Controller
         }
     }
 
+    /**
+     * Sync workspace property registry.
+     */
     private function syncWorkspacePropertyRegistry(array $propertyIds): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -299,6 +326,9 @@ class PropertyController extends Controller
         }
     }
 
+    /**
+     * Mark workspace property deleted.
+     */
     private function markWorkspacePropertyDeleted(string $propertyUuid): void
     {
         $tenant = request()->attributes->get('tenant');
@@ -308,6 +338,9 @@ class PropertyController extends Controller
         }
     }
 
+    /**
+     * Validate property location hierarchy.
+     */
     private function validatePropertyLocationHierarchy(
         ?Country $country,
         ?Region $region,
@@ -365,6 +398,9 @@ class PropertyController extends Controller
         return null;
     }
 
+    /**
+     * Resolve property location.
+     */
     private function resolvePropertyLocation(array $data): array|JsonResponse
     {
         $country = null;
@@ -442,6 +478,9 @@ class PropertyController extends Controller
         ];
     }
 
+    /**
+     * Validate required location depth.
+     */
     private function validateRequiredLocationDepth(
         ?Country $country,
         ?Region $region,
@@ -479,6 +518,9 @@ class PropertyController extends Controller
         return null;
     }
 
+    /**
+     * Load property details.
+     */
     private function loadPropertyDetails(Property $property): Property
     {
         $property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])

@@ -16,6 +16,9 @@ class PropertyTypeController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Handle the index request.
+     */
     public function index(PropertyTypeIndexRequest $request)
     {
         $this->authorize('viewAny', PropertyType::class);
@@ -37,6 +40,9 @@ class PropertyTypeController extends Controller
         return ApiResponse::resource(PropertyTypeResource::collection($propertyTypes), 'Property types list');
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StorePropertyTypeRequest $request)
     {
         $this->authorize('create', PropertyType::class);
@@ -54,6 +60,9 @@ class PropertyTypeController extends Controller
         return ApiResponse::resource(new PropertyTypeResource($propertyType), 'Property type created', 201);
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(PropertyType $propertyType)
     {
         $this->authorize('view', $propertyType);
@@ -61,6 +70,9 @@ class PropertyTypeController extends Controller
         return ApiResponse::resource(new PropertyTypeResource($propertyType->loadCount('properties')), 'Property type details');
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdatePropertyTypeRequest $request, PropertyType $propertyType)
     {
         $this->authorize('update', $propertyType);
@@ -86,6 +98,9 @@ class PropertyTypeController extends Controller
         return ApiResponse::resource(new PropertyTypeResource($propertyType->fresh()->loadCount('properties')), 'Property type updated');
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(PropertyType $propertyType)
     {
         $this->authorize('delete', $propertyType);

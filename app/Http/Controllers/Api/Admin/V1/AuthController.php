@@ -13,10 +13,16 @@ use Illuminate\Support\Facades\Hash;
 
 class AuthController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private JwtService $jwt)
     {
     }
 
+    /**
+     * Handle the login request.
+     */
     public function login(AdminLoginRequest $request)
     {
         $data = $request->validated();
@@ -76,6 +82,9 @@ class AuthController extends Controller
         ]), 'Login successful');
     }
 
+    /**
+     * Handle the me request.
+     */
     public function me()
     {
         $user = request()->attributes->get('admin_user');
@@ -90,6 +99,9 @@ class AuthController extends Controller
         ]), 'Current admin session');
     }
 
+    /**
+     * Handle the logout request.
+     */
     public function logout()
     {
         return ApiResponse::success('Logged out');

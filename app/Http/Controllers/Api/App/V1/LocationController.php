@@ -23,6 +23,9 @@ class LocationController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Handle countries.
+     */
     public function countries(CountryIndexRequest $request)
     {
         $this->authorize('viewAny', Country::class);
@@ -47,6 +50,9 @@ class LocationController extends Controller
         return ApiResponse::resource(CountryResource::collection($countries), 'Countries list');
     }
 
+    /**
+     * Apply country search.
+     */
     private function applyCountrySearch(Builder $query, string $search, ?string $status = null): void
     {
         $search = trim($search);
@@ -84,6 +90,9 @@ class LocationController extends Controller
         $query->where('name', 'like', $search.'%');
     }
 
+    /**
+     * Handle regions.
+     */
     public function regions(RegionIndexRequest $request)
     {
         $this->authorize('viewAny', Country::class);
@@ -119,6 +128,9 @@ class LocationController extends Controller
         return ApiResponse::resource(RegionResource::collection($regions), 'Regions list');
     }
 
+    /**
+     * Handle districts.
+     */
     public function districts(DistrictIndexRequest $request)
     {
         $this->authorize('viewAny', Country::class);
@@ -160,6 +172,9 @@ class LocationController extends Controller
         return ApiResponse::resource(DistrictResource::collection($districts), 'Districts list');
     }
 
+    /**
+     * Handle wards.
+     */
     public function wards(WardIndexRequest $request)
     {
         $this->authorize('viewAny', Country::class);

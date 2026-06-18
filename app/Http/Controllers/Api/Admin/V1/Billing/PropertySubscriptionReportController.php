@@ -13,11 +13,17 @@ use Illuminate\Contracts\Support\Arrayable;
 
 class PropertySubscriptionReportController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private PropertySubscriptionService $propertySubscriptionService,
     ) {
     }
 
+    /**
+     * Handle payment summary.
+     */
     public function paymentSummary(PropertySubscriptionPaymentSummaryRequest $request)
     {
         return ApiResponse::success(
@@ -26,6 +32,9 @@ class PropertySubscriptionReportController extends Controller
         );
     }
 
+    /**
+     * Handle the by workspace request.
+     */
     public function byWorkspace(PropertySubscriptionWorkspaceReportRequest $request)
     {
         $report = $this->propertySubscriptionService->workspaceReport($request->validated());
@@ -40,6 +49,9 @@ class PropertySubscriptionReportController extends Controller
         );
     }
 
+    /**
+     * Handle expired.
+     */
     public function expired(PropertySubscriptionExpiredIndexRequest $request)
     {
         $rows = $this->propertySubscriptionService->expiredPropertiesReport($request->validated());
@@ -50,6 +62,9 @@ class PropertySubscriptionReportController extends Controller
         );
     }
 
+    /**
+     * Paginate rows.
+     */
     private function paginateRows(LengthAwarePaginator $rows, ?callable $transformer = null): array
     {
         $transformer ??= fn (array $row) => $row;
@@ -77,6 +92,9 @@ class PropertySubscriptionReportController extends Controller
         ];
     }
 
+    /**
+     * Format workspace report row.
+     */
     private function formatWorkspaceReportRow(array $row): array
     {
         return [
@@ -96,6 +114,9 @@ class PropertySubscriptionReportController extends Controller
         ];
     }
 
+    /**
+     * Format expired property row.
+     */
     private function formatExpiredPropertyRow(array $row): array
     {
         return [
@@ -120,6 +141,9 @@ class PropertySubscriptionReportController extends Controller
         ];
     }
 
+    /**
+     * Normalize row.
+     */
     private function normalizeRow(mixed $row): array
     {
         if ($row instanceof Arrayable) {

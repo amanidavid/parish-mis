@@ -22,10 +22,16 @@ class TenantUserController extends Controller
 {
     use InteractsWithTenantModels;
 
+    /**
+     * Create a new instance.
+     */
     public function __construct(private StaffProvisioningService $staffProvisioningService)
     {
     }
 
+    /**
+     * Handle the index request.
+     */
     public function index(TenantUserIndexRequest $request)
     {
         $this->authorize('viewAny', User::class);
@@ -62,6 +68,9 @@ class TenantUserController extends Controller
         return ApiResponse::resource(TenantUserResource::collection($tenantUsers), 'Tenant staff list');
     }
 
+    /**
+     * Handle the store request.
+     */
     public function store(StoreTenantUserRequest $request)
     {
         $this->authorize('create', User::class);
@@ -102,6 +111,9 @@ class TenantUserController extends Controller
         ], 201);
     }
 
+    /**
+     * Handle the show request.
+     */
     public function show(User $tenantUser)
     {
         $this->authorize('view', $tenantUser);
@@ -115,6 +127,9 @@ class TenantUserController extends Controller
         return ApiResponse::resource(new TenantUserResource($tenantUser), 'Tenant staff details');
     }
 
+    /**
+     * Handle the update request.
+     */
     public function update(UpdateTenantUserRequest $request, User $tenantUser)
     {
         $this->authorize('update', $tenantUser);
@@ -221,6 +236,9 @@ class TenantUserController extends Controller
         ])), 'Tenant staff updated');
     }
 
+    /**
+     * Handle the destroy request.
+     */
     public function destroy(User $tenantUser)
     {
         $this->authorize('delete', $tenantUser);
@@ -261,6 +279,9 @@ class TenantUserController extends Controller
         return ApiResponse::success('Tenant staff deleted');
     }
 
+    /**
+     * Map staff provisioning error.
+     */
     private function mapStaffProvisioningError(string $message): array
     {
         return match ($message) {

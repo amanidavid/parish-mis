@@ -11,6 +11,9 @@ use Illuminate\Support\Str;
 
 class WorkspaceService
 {
+    /**
+     * Create workspace for user.
+     */
     public function createWorkspaceForUser(BaseUser $baseUser, array $data, string $createdVia = 'self_service'): Tenant
     {
         $existingWorkspace = $this->findOwnedWorkspaceForUser($baseUser->id);
@@ -62,6 +65,9 @@ class WorkspaceService
         });
     }
 
+    /**
+     * Handle default workspace data for user.
+     */
     public function defaultWorkspaceDataForUser(array $userData): array
     {
         $phoneDigits = preg_replace('/\D+/', '', (string) ($userData['phone'] ?? ''));
@@ -75,6 +81,9 @@ class WorkspaceService
         ];
     }
 
+    /**
+     * Handle find owned workspace for user.
+     */
     public function findOwnedWorkspaceForUser(int $baseUserId): ?Tenant
     {
         return Tenant::query()

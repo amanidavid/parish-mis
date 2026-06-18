@@ -16,6 +16,9 @@ use Spatie\Permission\PermissionRegistrar;
 
 class TenantProvisioningService
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(
         private SubscriptionService $subscriptionService,
         private TenantConnectionManager $tenantConnectionManager
@@ -23,11 +26,17 @@ class TenantProvisioningService
     {
     }
 
+    /**
+     * Handle dispatch provisioning.
+     */
     public function dispatchProvisioning(Tenant $tenant, int $ownerId, ?string $planUuid = null): void
     {
         ProvisionTenantWorkspace::dispatch($tenant->id, $ownerId, $planUuid)->afterCommit();
     }
 
+    /**
+     * Handle provision.
+     */
     public function provision(int $tenantId, int $ownerId, ?string $planUuid = null): void
     {
         $tenant = Tenant::query()->findOrFail($tenantId);
@@ -129,6 +138,9 @@ class TenantProvisioningService
         }
     }
 
+    /**
+     * Handle mark failed.
+     */
     public function markFailed(int $tenantId, string $message, array $context = []): void
     {
         DB::connection('base')->transaction(function () use ($tenantId, $message) {
@@ -142,6 +154,9 @@ class TenantProvisioningService
         $this->log($tenantId, 'failed', 'failed', $message, $context);
     }
 
+    /**
+     * Handle retry.
+     */
     public function retry(Tenant $tenant, int $ownerId, ?string $planUuid = null): Tenant
     {
         DB::connection('base')->transaction(function () use ($tenant) {
@@ -158,6 +173,9 @@ class TenantProvisioningService
         return $tenant->fresh();
     }
 
+    /**
+     * Mark provisioning.
+     */
     private function markProvisioning(int $tenantId): void
     {
         DB::connection('base')->transaction(function () use ($tenantId) {
@@ -171,6 +189,9 @@ class TenantProvisioningService
         });
     }
 
+    /**
+     * Log.
+     */
     private function log(int $tenantId, string $status, string $step, ?string $message = null, array $context = []): void
     {
         DB::connection('base')->table('tenant_database_provision_logs')->insert([
@@ -185,6 +206,9 @@ class TenantProvisioningService
         ]);
     }
 
+    /**
+     * Run artisan command.
+     */
     private function runArtisanCommand(string $command, array $parameters, int $tenantId, string $step): void
     {
         $exitCode = Artisan::call($command, $parameters);
@@ -208,6 +232,9 @@ class TenantProvisioningService
                 : sprintf('Tenant %s failed with exit code %d.', $step, $exitCode)
         );
     }
+    /**
+     * Create tenant database.
+     */
     private function createTenantDatabase(string $databaseName, string $tenantConnectionName, string $tenantDriver): void
     {
         if ($tenantDriver === 'pgsql') {
@@ -244,6 +271,9 @@ class TenantProvisioningService
         );
     }
 
+    /**
+     * Assert tenant database selected.
+     */
     private function assertTenantDatabaseSelected(string $databaseName, string $tenantConnectionName, string $tenantDriver): void
     {
         $selected = $tenantDriver === 'pgsql'
@@ -255,6 +285,9 @@ class TenantProvisioningService
         }
     }
 
+    /**
+     * Quote identifier.
+     */
     private function quoteIdentifier(string $value, string $driver): string
     {
         if ($driver === 'pgsql') {

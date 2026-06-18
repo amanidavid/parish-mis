@@ -24,6 +24,9 @@ class PropertyAssignmentAccessService
 
     private ?bool $bypassPermissionExists = null;
 
+    /**
+     * Determine whether bypass property scope.
+     */
     public function canBypassPropertyScope(User $user): bool
     {
         if (!$this->bypassPermissionExists()) {
@@ -33,6 +36,9 @@ class PropertyAssignmentAccessService
         return $user->hasPermissionTo(self::BYPASS_PERMISSION);
     }
 
+    /**
+     * Handle the bypass permission exists request.
+     */
     private function bypassPermissionExists(): bool
     {
         if ($this->bypassPermissionExists === null) {
@@ -50,7 +56,7 @@ class PropertyAssignmentAccessService
     }
 
     /**
-     * @return array<int>
+     * Handle assigned property ids.
      */
     public function assignedPropertyIds(User $user): array
     {
@@ -69,6 +75,9 @@ class PropertyAssignmentAccessService
         return $this->assignedPropertyIdsCache[$user->id];
     }
 
+    /**
+     * Handle user can access property.
+     */
     public function userCanAccessProperty(User $user, int $propertyId): bool
     {
         if ($this->canBypassPropertyScope($user)) {
@@ -78,26 +87,41 @@ class PropertyAssignmentAccessService
         return in_array($propertyId, $this->assignedPropertyIds($user), true);
     }
 
+    /**
+     * Scope properties.
+     */
     public function scopeProperties(Builder $query, User $user, string $column = 'properties.id'): Builder
     {
         return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
 
+    /**
+     * Scope property floors.
+     */
     public function scopePropertyFloors(Builder $query, User $user, string $column = 'property_id'): Builder
     {
         return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
 
+    /**
+     * Scope maintenance jobs.
+     */
     public function scopeMaintenanceJobs(Builder $query, User $user, string $column = 'property_id'): Builder
     {
         return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
 
+    /**
+     * Scope maintenance expenses.
+     */
     public function scopeMaintenanceExpenses(Builder $query, User $user, string $column = 'maintenance_jobs.property_id'): Builder
     {
         return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
 
+    /**
+     * Scope units.
+     */
     public function scopeUnits(Builder $query, User $user): Builder
     {
         if ($this->canBypassPropertyScope($user)) {
@@ -121,6 +145,9 @@ class PropertyAssignmentAccessService
             : $query->whereIn('property_floor_id', $floorIds);
     }
 
+    /**
+     * Scope contracts.
+     */
     public function scopeContracts(Builder $query, User $user): Builder
     {
         if ($this->canBypassPropertyScope($user)) {
@@ -146,21 +173,33 @@ class PropertyAssignmentAccessService
         return $query->whereHas('unit', fn (Builder $innerQuery) => $innerQuery->whereIn('property_floor_id', $floorIds));
     }
 
+    /**
+     * Scope customers.
+     */
     public function scopeCustomers(Builder $query, User $user): Builder
     {
         return $this->scopeByAssignedPropertyIds($query, $user, 'property_id');
     }
 
+    /**
+     * Determine whether access property model.
+     */
     public function canAccessPropertyModel(User $user, Property $property): bool
     {
         return $this->userCanAccessProperty($user, (int) $property->id);
     }
 
+    /**
+     * Determine whether access property floor model.
+     */
     public function canAccessPropertyFloorModel(User $user, PropertyFloor $propertyFloor): bool
     {
         return $this->userCanAccessProperty($user, (int) $propertyFloor->property_id);
     }
 
+    /**
+     * Determine whether access unit model.
+     */
     public function canAccessUnitModel(User $user, Unit $unit): bool
     {
         $propertyId = $unit->relationLoaded('propertyFloor')
@@ -170,6 +209,9 @@ class PropertyAssignmentAccessService
         return $propertyId !== null && $this->userCanAccessProperty($user, (int) $propertyId);
     }
 
+    /**
+     * Determine whether access customer contract model.
+     */
     public function canAccessCustomerContractModel(User $user, CustomerContract $customerContract): bool
     {
         $propertyId = $customerContract->relationLoaded('unit')
@@ -182,17 +224,26 @@ class PropertyAssignmentAccessService
         return $propertyId !== null && $this->userCanAccessProperty($user, (int) $propertyId);
     }
 
+    /**
+     * Determine whether access customer model.
+     */
     public function canAccessCustomerModel(User $user, Customer $customer): bool
     {
         return $customer->property_id !== null
             && $this->userCanAccessProperty($user, (int) $customer->property_id);
     }
 
+    /**
+     * Determine whether access maintenance job model.
+     */
     public function canAccessMaintenanceJobModel(User $user, MaintenanceJob $maintenanceJob): bool
     {
         return $this->userCanAccessProperty($user, (int) $maintenanceJob->property_id);
     }
 
+    /**
+     * Determine whether access maintenance expense model.
+     */
     public function canAccessMaintenanceExpenseModel(User $user, MaintenanceExpense $maintenanceExpense): bool
     {
         $propertyId = $maintenanceExpense->relationLoaded('maintenanceJob')
@@ -204,6 +255,9 @@ class PropertyAssignmentAccessService
         return $propertyId !== null && $this->userCanAccessProperty($user, (int) $propertyId);
     }
 
+    /**
+     * Scope by assigned property ids.
+     */
     private function scopeByAssignedPropertyIds(Builder $query, User $user, string $column): Builder
     {
         if ($this->canBypassPropertyScope($user)) {

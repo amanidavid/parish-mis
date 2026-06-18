@@ -9,11 +9,17 @@ use App\Support\ApiResponse;
 
 class DashboardController extends Controller
 {
+    /**
+     * Create a new instance.
+     */
     public function __construct(private PlatformOverviewService $platformOverviewService)
     {
     }
 
     /** Return the landlord-only platform overview needed by the admin dashboard in one compact response. */
+    /**
+     * Handle the overview request.
+     */
     public function overview()
     {
         $overview = $this->platformOverviewService->overview();
