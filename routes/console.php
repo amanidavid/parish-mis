@@ -164,4 +164,4 @@ Artisan::command('billing:run-automation', function () {
     return self::SUCCESS;
 })->purpose('Run due billing automation tasks');
 
-Schedule::command('billing:run-automation')->everyMinute();
+// Schedule::command('billing:run-automation')->everyMinute();
