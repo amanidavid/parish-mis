@@ -20,6 +20,7 @@ class MaintenanceExpenseResource extends ApiJsonResource
             'maintenance_job' => $this->whenLoaded('maintenanceJob', fn () => $this->maintenanceJob ? [
                 'uuid' => $this->maintenanceJob->uuid,
                 'title' => $this->maintenanceJob->title,
+                'status' => $this->maintenanceJob->status,
                 'reported_date' => $this->maintenanceJob->reported_date?->format('Y-m-d'),
             ] : null),
             'property' => $this->whenLoaded('maintenanceJob', fn () => $maintenanceJob?->property ? [

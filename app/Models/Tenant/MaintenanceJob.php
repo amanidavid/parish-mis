@@ -9,6 +9,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class MaintenanceJob extends BaseModel
 {
     protected $table = 'maintenance_jobs';
+    public const STATUS_OPEN = 'open';
+    public const STATUS_IN_PROGRESS = 'in_progress';
+    public const STATUS_CLOSED = 'closed';
 
     protected $casts = [
         'reported_date' => 'date:Y-m-d',

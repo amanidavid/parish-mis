@@ -18,7 +18,7 @@ class CustomerContractIndexRequest extends FormRequest
             'property_uuid' => ['nullable', 'uuid'],
             'customer_uuid' => ['nullable', 'uuid'],
             'unit_uuid' => ['nullable', 'uuid'],
-            'status' => ['nullable', 'in:draft,active,expired,terminated,renewed'],
+            'status' => ['nullable', 'in:draft,active,expired,terminated'],
             'contract_number' => ['nullable', 'string', 'max:120'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
             'sort' => ['nullable', 'in:start_date,-start_date,contract_number,-contract_number,created_at,-created_at'],

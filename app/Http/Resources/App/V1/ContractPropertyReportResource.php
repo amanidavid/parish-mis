@@ -17,7 +17,6 @@ class ContractPropertyReportResource extends JsonResource
             'active_contracts_count' => (int) $this->active_contracts_count,
             'expired_contracts_count' => (int) $this->expired_contracts_count,
             'terminated_contracts_count' => (int) $this->terminated_contracts_count,
-            'renewed_contracts_count' => (int) $this->renewed_contracts_count,
             'draft_contracts_count' => (int) $this->draft_contracts_count,
             'total_contract_amount' => (float) $this->total_contract_amount,
             'active_contract_amount' => (float) $this->active_contract_amount,

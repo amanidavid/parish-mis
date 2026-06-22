@@ -16,9 +16,10 @@ class CustomerContractResource extends ApiJsonResource
             'contract_number' => $this->contract_number,
             'start_date' => $this->start_date?->toDateString(),
             'end_date' => $this->end_date?->toDateString(),
+            'duration_months' => $this->durationMonths(),
+            'duration_label' => $this->durationLabel(),
             'amount' => $this->amount,
             'currency' => $this->currency,
-            'billing_cycle' => $this->billing_cycle,
             'status' => $this->status,
             'notes' => $this->notes,
             'customer' => $this->whenLoaded('customer', fn () => [

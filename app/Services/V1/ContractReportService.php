@@ -53,7 +53,6 @@ class ContractReportService
             'draft_contracts_count' => (int) optional($statusRows->firstWhere('status', 'draft'))->contracts_count,
             'expired_contracts_count' => (int) optional($statusRows->firstWhere('status', 'expired'))->contracts_count,
             'terminated_contracts_count' => (int) optional($statusRows->firstWhere('status', 'terminated'))->contracts_count,
-            'renewed_contracts_count' => (int) optional($statusRows->firstWhere('status', 'renewed'))->contracts_count,
         ];
 
         return [
@@ -88,7 +87,6 @@ class ContractReportService
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'active' THEN 1 ELSE 0 END) as active_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'expired' THEN 1 ELSE 0 END) as expired_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'renewed' THEN 1 ELSE 0 END) as renewed_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'draft' THEN 1 ELSE 0 END) as draft_contracts_count")
             ->selectRaw('COALESCE(SUM(customer_contracts.amount), 0) as total_contract_amount')
             ->selectRaw("COALESCE(SUM(CASE WHEN customer_contracts.status = 'active' THEN customer_contracts.amount ELSE 0 END), 0) as active_contract_amount")
@@ -134,7 +132,7 @@ class ContractReportService
             ->whereNotNull('customer_contracts.end_date');
 
         if (empty($filters['status'] ?? null)) {
-            $query->whereIn('customer_contracts.status', ['active', 'renewed']);
+            $query->where('customer_contracts.status', 'active');
         }
 
         [$expiryStartDate, $expiryEndDate] = $this->resolveExpiryWindow($filters);
@@ -198,7 +196,7 @@ class ContractReportService
         }
 
         [$bucketSql, $bucketLabelSql] = $this->chartBucketExpressions($period);
-        $recognizedStatuses = ['active', 'renewed'];
+        $recognizedStatuses = ['active'];
 
         // We aggregate once by chart bucket, then derive summary totals from those rows
         // to avoid running the same filtered contract scan twice.
@@ -206,9 +204,9 @@ class ContractReportService
             ->selectRaw($bucketSql.' as bucket_key')
             ->selectRaw($bucketLabelSql.' as bucket_label')
             ->selectRaw('COUNT(customer_contracts.id) as contracts_count')
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status IN ('active', 'renewed') THEN 1 ELSE 0 END) as recognized_contracts_count")
+            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'active' THEN 1 ELSE 0 END) as recognized_contracts_count")
             ->selectRaw('COALESCE(SUM(customer_contracts.amount), 0) as total_contract_amount')
-            ->selectRaw("COALESCE(SUM(CASE WHEN customer_contracts.status IN ('active', 'renewed') THEN customer_contracts.amount ELSE 0 END), 0) as recognized_contract_amount")
+            ->selectRaw("COALESCE(SUM(CASE WHEN customer_contracts.status = 'active' THEN customer_contracts.amount ELSE 0 END), 0) as recognized_contract_amount")
             ->groupByRaw($bucketSql.', '.$bucketLabelSql)
             ->orderBy('bucket_key')
             ->get();

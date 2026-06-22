@@ -19,7 +19,22 @@ class UpdateMaintenanceJobRequest extends FormRequest
             'unit_uuid' => ['sometimes', 'nullable', 'uuid'],
             'title' => ['sometimes', 'string', 'min:2', 'max:160'],
             'description' => ['sometimes', 'nullable', 'string', 'max:5000'],
+            'status' => ['sometimes', 'in:open,in_progress,closed'],
             'reported_date' => ['sometimes', 'date'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'property_uuid.uuid' => 'The selected property is invalid.',
+            'property_floor_uuid.uuid' => 'The selected floor is invalid.',
+            'unit_uuid.uuid' => 'The selected unit is invalid.',
+            'title.min' => 'The maintenance job title must be at least 2 characters.',
+            'title.max' => 'The maintenance job title cannot exceed 160 characters.',
+            'description.max' => 'The maintenance job description cannot exceed 5000 characters.',
+            'status.in' => 'Choose a valid maintenance job status: open, in progress, or closed.',
+            'reported_date.date' => 'The reported date is not a valid date.',
         ];
     }
 }

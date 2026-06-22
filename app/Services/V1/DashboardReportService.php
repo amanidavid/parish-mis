@@ -93,7 +93,6 @@ class DashboardReportService
                 DB::raw('COALESCE(contract_metrics.contracts_active, 0) as contracts_active'),
                 DB::raw('COALESCE(contract_metrics.contracts_expired, 0) as contracts_expired'),
                 DB::raw('COALESCE(contract_metrics.contracts_terminated, 0) as contracts_terminated'),
-                DB::raw('COALESCE(contract_metrics.contracts_renewed, 0) as contracts_renewed'),
             ]);
 
         if (!empty($filters['search'] ?? null)) {
@@ -146,8 +145,7 @@ class DashboardReportService
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'draft' THEN 1 ELSE 0 END) as contracts_draft")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'active' THEN 1 ELSE 0 END) as contracts_active")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'expired' THEN 1 ELSE 0 END) as contracts_expired")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as contracts_terminated")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'renewed' THEN 1 ELSE 0 END) as contracts_renewed");
+            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as contracts_terminated");
 
         return $this->applyPropertyScopeToColumn($query, $scope, 'property_floors.property_id');
     }

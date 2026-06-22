@@ -93,13 +93,17 @@ class MaintenanceJobController extends Controller
             $this->applyPrefixSearch($query, $filters['search'], ['title']);
         }
 
+        if (!empty($filters['status'] ?? null)) {
+            $query->where('status', $filters['status']);
+        }
+
         if (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null)) {
             $startDate = $filters['start_date'] ?? $filters['end_date'];
             $endDate = $filters['end_date'] ?? $filters['start_date'];
             $query->whereBetween('reported_date', [$startDate, $endDate]);
         }
 
-        $this->applySort($query, $filters['sort'] ?? null, ['reported_date', 'title', 'created_at', 'total_expense_amount'], 'reported_date', 'desc');
+        $this->applySort($query, $filters['sort'] ?? null, ['reported_date', 'title', 'status', 'created_at', 'total_expense_amount'], 'reported_date', 'desc');
 
         $jobs = $query->paginate((int) ($filters['per_page'] ?? 15));
 
@@ -139,6 +143,7 @@ class MaintenanceJobController extends Controller
                 'unit_id' => $resolvedHierarchy['unit']?->id,
                 'title' => $this->normalizeTitle($data['title']),
                 'description' => $this->normalizeDescription($data['description'] ?? null),
+                'status' => $data['status'] ?? MaintenanceJob::STATUS_OPEN,
                 'reported_date' => $data['reported_date'] ?? now()->toDateString(),
                 'recorded_by' => $tenantUser instanceof TenantUser ? $tenantUser->id : null,
             ]);
@@ -197,6 +202,7 @@ class MaintenanceJobController extends Controller
                 'unit_id' => $resolvedHierarchy['unit']?->id,
                 'title' => array_key_exists('title', $data) ? $this->normalizeTitle($data['title']) : $maintenanceJob->title,
                 'description' => array_key_exists('description', $data) ? $this->normalizeDescription($data['description']) : $maintenanceJob->description,
+                'status' => $data['status'] ?? $maintenanceJob->status,
                 'reported_date' => $data['reported_date'] ?? $maintenanceJob->reported_date,
             ])->save();
         });

@@ -45,7 +45,6 @@ class TenantAdminInsightService
             ->selectRaw("SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) as draft_contracts")
             ->selectRaw("SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expired_contracts")
             ->selectRaw("SUM(CASE WHEN status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts")
-            ->selectRaw("SUM(CASE WHEN status = 'renewed' THEN 1 ELSE 0 END) as renewed_contracts")
             ->selectRaw('COALESCE(SUM(amount), 0) as total_contract_amount')
             ->selectRaw("COALESCE(SUM(CASE WHEN status = 'active' THEN amount ELSE 0 END), 0) as active_contract_amount")
             ->first();
@@ -82,7 +81,6 @@ class TenantAdminInsightService
                 'draft' => (int) ($contractTotals->draft_contracts ?? 0),
                 'expired' => (int) ($contractTotals->expired_contracts ?? 0),
                 'terminated' => (int) ($contractTotals->terminated_contracts ?? 0),
-                'renewed' => (int) ($contractTotals->renewed_contracts ?? 0),
                 'total_contract_amount' => (float) ($contractTotals->total_contract_amount ?? 0),
                 'active_contract_amount' => (float) ($contractTotals->active_contract_amount ?? 0),
             ],
@@ -412,7 +410,6 @@ class TenantAdminInsightService
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'draft' THEN 1 ELSE 0 END) as draft_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'expired' THEN 1 ELSE 0 END) as expired_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'renewed' THEN 1 ELSE 0 END) as renewed_contracts_count")
             ->first();
 
         $statusBreakdown = (clone $query)
@@ -431,7 +428,7 @@ class TenantAdminInsightService
             ->all();
 
         $expiringSoonCount = (clone $query)
-            ->whereIn('customer_contracts.status', ['active', 'renewed'])
+            ->where('customer_contracts.status', 'active')
             ->whereNotNull('customer_contracts.end_date')
             ->whereBetween('customer_contracts.end_date', [
                 Carbon::today()->toDateString(),
@@ -460,7 +457,6 @@ class TenantAdminInsightService
                 'draft_contracts_count' => (int) ($totals->draft_contracts_count ?? 0),
                 'expired_contracts_count' => (int) ($totals->expired_contracts_count ?? 0),
                 'terminated_contracts_count' => (int) ($totals->terminated_contracts_count ?? 0),
-                'renewed_contracts_count' => (int) ($totals->renewed_contracts_count ?? 0),
                 'expiring_soon_count' => (int) $expiringSoonCount,
             ],
             'by_status' => $statusBreakdown,

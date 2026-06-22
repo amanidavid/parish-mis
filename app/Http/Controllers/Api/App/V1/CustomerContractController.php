@@ -20,6 +20,7 @@ use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -137,25 +138,22 @@ class CustomerContractController extends Controller
             return $error;
         }
 
-        $exists = CustomerContract::query()->where('contract_number', trim($data['contract_number']))->exists();
-        if ($exists) {
-            return ApiResponse::error('Contract already exists', ['contract_number' => ['Duplicate contract number']], 422);
-        }
-
         if ($this->ruleService->hasOverlappingUnitContract($unitId, $data['start_date'], $data['end_date'] ?? null)) {
             return ApiResponse::error('Contract period conflict', ['unit_uuid' => ['This unit already has an overlapping contract period']], 422);
         }
 
-        $contract = DB::transaction(function () use ($customer, $unitId, $data) {
+        $contract = DB::transaction(function () use ($customer, $unitId, $data, $unit) {
             $contract = CustomerContract::query()->create([
                 'customer_id' => $customer->id,
                 'unit_id' => $unitId,
-                'contract_number' => trim($data['contract_number']),
+                'contract_number' => $this->generateContractNumber(
+                    (int) $unit->propertyFloor->property->id,
+                    (string) $data['start_date']
+                ),
                 'start_date' => $data['start_date'],
                 'end_date' => $data['end_date'] ?? null,
                 'amount' => $data['amount'],
                 'currency' => strtoupper($data['currency'] ?? 'TZS'),
-                'billing_cycle' => $data['billing_cycle'] ?? 'monthly',
                 'status' => $data['status'] ?? 'draft',
                 'notes' => $data['notes'] ?? null,
             ]);
@@ -255,7 +253,6 @@ class CustomerContractController extends Controller
                 'end_date' => array_key_exists('end_date', $data) ? $data['end_date'] : $customerContract->end_date,
                 'amount' => $data['amount'] ?? $customerContract->amount,
                 'currency' => isset($data['currency']) ? strtoupper($data['currency']) : $customerContract->currency,
-                'billing_cycle' => $data['billing_cycle'] ?? $customerContract->billing_cycle,
                 'status' => $data['status'] ?? $customerContract->status,
                 'notes' => array_key_exists('notes', $data) ? $data['notes'] : $customerContract->notes,
             ])->save();
@@ -400,5 +397,28 @@ class CustomerContractController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Generate contract number.
+     */
+    private function generateContractNumber(int $propertyId, string $startDate): string
+    {
+        $year = Carbon::parse($startDate)->format('Y');
+        $prefix = sprintf('CNT-%s-%d-', $year, $propertyId);
+
+        $latestNumber = CustomerContract::query()
+            ->where('contract_number', 'like', $prefix.'%')
+            ->orderByDesc('contract_number')
+            ->value('contract_number');
+
+        $nextSequence = 1;
+
+        if (is_string($latestNumber)
+            && preg_match('/^CNT-\d{4}-\d+-(\d+)$/', $latestNumber, $matches) === 1) {
+            $nextSequence = ((int) $matches[1]) + 1;
+        }
+
+        return sprintf('CNT-%s-%d-%03d', $year, $propertyId, $nextSequence);
     }
 }

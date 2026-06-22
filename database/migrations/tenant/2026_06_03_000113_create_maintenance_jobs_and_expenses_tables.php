@@ -18,10 +18,12 @@ return new class extends Migration
                 $table->foreignId('unit_id')->nullable()->constrained('units')->restrictOnDelete();
                 $table->string('title');
                 $table->text('description')->nullable();
+                $table->enum('status', ['open', 'in_progress', 'closed'])->default('open')->index();
                 $table->date('reported_date')->index();
                 $table->foreignId('recorded_by')->nullable()->constrained('users')->nullOnDelete();
                 $table->timestamps();
 
+                $table->index(['property_id', 'status']);
                 $table->index(['property_id', 'reported_date']);
                 $table->index(['property_floor_id', 'reported_date']);
                 $table->index(['unit_id', 'reported_date']);
