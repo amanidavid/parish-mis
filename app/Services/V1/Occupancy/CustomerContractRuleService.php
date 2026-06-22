@@ -11,7 +11,7 @@ use Illuminate\Support\Carbon;
 class CustomerContractRuleService
 {
     public const OPEN_ENDED_CONTRACT_END_DATE = '9999-12-31';
-    public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active'];
+    public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active', 'renewed'];
 
     /**
      * Handle find duplicate customer.

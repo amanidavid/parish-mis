@@ -35,6 +35,8 @@ Route::prefix('v1')->group(function () {
         ->group(function () {
             Route::prefix('auth')->group(function () {
                 Route::post('login', [AdminAuthController::class, 'login'])->middleware('throttle:login');
+                Route::post('forgot-password', [AdminAuthController::class, 'forgotPassword'])->middleware('throttle:login');
+                Route::post('reset-password', [AdminAuthController::class, 'resetPassword'])->middleware('throttle:login');
                 Route::post('logout', [AdminAuthController::class, 'logout'])->middleware('admin.jwt.auth');
                 Route::get('me', [AdminAuthController::class, 'me'])->middleware('admin.jwt.auth');
             });
@@ -104,6 +106,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('forgot-password', [AppAuthController::class, 'forgotPassword'])->middleware('throttle:login');
                 Route::post('reset-password', [AppAuthController::class, 'resetPassword'])->middleware('throttle:login');
                 Route::post('change-password', [AppAuthController::class, 'changePassword'])->middleware('jwt.auth');
+                Route::patch('profile', [AppAuthController::class, 'updateProfile'])->middleware('jwt.auth');
                 Route::post('refresh', [AppAuthController::class, 'refresh'])->middleware(['jwt.auth', 'throttle:refresh']);
                 Route::post('logout', [AppAuthController::class, 'logout'])->middleware('jwt.auth');
             });

@@ -8,6 +8,7 @@ use App\Http\Requests\Api\App\V1\ForgotPasswordRequest;
 use App\Http\Requests\Api\App\V1\LoginRequest;
 use App\Http\Requests\Api\App\V1\RegisterRequest;
 use App\Http\Requests\Api\App\V1\ResetPasswordRequest;
+use App\Http\Requests\Api\App\V1\UpdateProfileRequest;
 use App\Http\Requests\Api\App\V1\VerifyOtpRequest;
 use App\Http\Resources\App\V1\AppMeResource;
 use App\Http\Resources\App\V1\AppSessionResource;
@@ -16,6 +17,7 @@ use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\OtpToken;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenant\Country;
+use App\Models\Tenant\User as TenantUser;
 use App\Services\V1\JwtService;
 use App\Services\V1\OtpService;
 use App\Services\V1\SubscriptionService;
@@ -297,6 +299,110 @@ class AuthController extends Controller
         });
 
         return ApiResponse::success('Password changed successfully.');
+    }
+
+    /**
+     * Handle the update profile request.
+     */
+    public function updateProfile(UpdateProfileRequest $request)
+    {
+        $baseUser = request()->attributes->get('base_user') ?? request()->attributes->get('auth_user');
+        if (!$baseUser instanceof BaseUser) {
+            return ApiResponse::error('Unauthorized', ['token' => ['Unable to resolve authenticated user']], 401);
+        }
+
+        $tenantUser = request()->attributes->get('tenant_user');
+        $data = $request->validated();
+        $existingCountryCode = $this->normalizeCountryCode(data_get($baseUser->meta, 'country_code'));
+        $countryCode = array_key_exists('country_code', $data)
+            ? $this->normalizeCountryCode($data['country_code'])
+            : $existingCountryCode;
+        $newPhone = array_key_exists('phone', $data)
+            ? $this->composePhoneNumber($countryCode, $data['phone'])
+            : $baseUser->phone;
+        $newEmail = array_key_exists('email', $data) ? $this->normalizeEmail($data['email']) : $baseUser->email;
+        $newUsername = array_key_exists('username', $data) ? $this->normalizeUsername($data['username']) : $baseUser->username;
+        $newName = $data['name'] ?? $baseUser->name;
+
+        $baseConflict = BaseUser::query()
+            ->where(function ($query) use ($newPhone, $newEmail, $newUsername) {
+                $query->where('phone', $newPhone);
+
+                if (!empty($newEmail)) {
+                    $query->orWhere('email', $newEmail);
+                }
+
+                if (!empty($newUsername)) {
+                    $query->orWhere('username', $newUsername);
+                }
+            })
+            ->whereKeyNot($baseUser->id)
+            ->exists();
+
+        if ($baseConflict) {
+            return ApiResponse::error('Profile could not be updated.', [
+                'user' => ['Phone, email, or username is already in use.'],
+            ], 422);
+        }
+
+        if ($tenantUser instanceof TenantUser) {
+            $tenantConflict = TenantUser::query()
+                ->where(function ($query) use ($newPhone, $newEmail) {
+                    $query->where('phone', $newPhone);
+
+                    if (!empty($newEmail)) {
+                        $query->orWhere('email', $newEmail);
+                    }
+                })
+                ->whereKeyNot($tenantUser->id)
+                ->exists();
+
+            if ($tenantConflict) {
+                return ApiResponse::error('Profile could not be updated.', [
+                    'user' => ['Phone or email already belongs to another workspace account.'],
+                ], 422);
+            }
+        }
+
+        DB::connection('base')->transaction(function () use ($baseUser, $newUsername, $newName, $newPhone, $newEmail, $countryCode) {
+            $baseUser->forceFill([
+                'username' => $newUsername,
+                'name' => $newName,
+                'phone' => $newPhone,
+                'email' => $newEmail,
+                'meta' => array_merge((array) $baseUser->meta, [
+                    'country_code' => $countryCode !== '' ? $countryCode : null,
+                ]),
+            ])->save();
+        });
+
+        if ($tenantUser instanceof TenantUser) {
+            DB::transaction(function () use ($tenantUser, $newName, $newPhone, $newEmail) {
+                $tenantUser->forceFill([
+                    'name' => $newName,
+                    'phone' => $newPhone,
+                    'email' => $newEmail,
+                ])->save();
+            });
+        }
+
+        $freshBaseUser = BaseUser::query()->findOrFail($baseUser->id);
+        $freshTenantUser = $tenantUser instanceof TenantUser
+            ? $tenantUser->fresh(['roles.permissions', 'permissions' => fn ($permissionQuery) => $permissionQuery->orderBy('module')->orderBy('name')])
+            : null;
+
+        return ApiResponse::resource(
+            new AppMeResource([
+                'base_user' => $freshBaseUser,
+                'country' => $this->resolveBaseUserCountry($freshBaseUser),
+                'tenant' => request()->attributes->get('tenant'),
+                'tenant_user' => $freshTenantUser,
+                'subscription' => request()->attributes->get('tenant')
+                    ? $this->subscriptionService->getWorkspaceSubscriptionSummary(request()->attributes->get('tenant'))
+                    : null,
+            ]),
+            'Profile updated successfully.'
+        );
     }
 
     /**
