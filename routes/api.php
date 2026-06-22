@@ -35,6 +35,8 @@ Route::prefix('v1')->group(function () {
         ->group(function () {
             Route::prefix('auth')->group(function () {
                 Route::post('login', [AdminAuthController::class, 'login'])->middleware('throttle:login');
+                Route::post('forgot-password', [AdminAuthController::class, 'forgotPassword'])->middleware('throttle:login');
+                Route::post('reset-password', [AdminAuthController::class, 'resetPassword'])->middleware('throttle:login');
                 Route::post('logout', [AdminAuthController::class, 'logout'])->middleware('admin.jwt.auth');
                 Route::get('me', [AdminAuthController::class, 'me'])->middleware('admin.jwt.auth');
             });
