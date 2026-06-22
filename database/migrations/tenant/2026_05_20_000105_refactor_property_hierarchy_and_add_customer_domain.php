@@ -272,7 +272,7 @@ return new class extends Migration
                 $table->decimal('amount', 15, 2);
                 $table->char('currency', 3)->default('TZS');
                 $table->enum('billing_cycle', ['monthly', 'quarterly', 'semi_annually', 'annually', 'one_time'])->default('monthly');
-                $table->enum('status', ['draft', 'active', 'expired', 'terminated', 'renewed'])->default('draft')->index();
+                $table->enum('status', ['draft', 'active', 'expired', 'terminated'])->default('draft')->index();
                 $table->text('notes')->nullable();
                 $table->timestamps();
 

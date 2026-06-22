@@ -13,6 +13,7 @@ class MaintenanceJobResource extends ApiJsonResource
             'uuid' => $this->uuid,
             'title' => $this->title,
             'description' => $this->description,
+            'status' => $this->status,
             'reported_date' => $this->reported_date?->format('Y-m-d'),
             'expenses_count' => isset($this->expenses_count) ? (int) $this->expenses_count : null,
             'total_expense_amount' => isset($this->total_expense_amount) ? (float) $this->total_expense_amount : null,

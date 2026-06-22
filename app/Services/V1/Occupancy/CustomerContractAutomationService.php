@@ -3,10 +3,14 @@
 namespace App\Services\V1\Occupancy;
 
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\TenantProvisioningService;
 use App\Support\Tenancy\TenantConnectionManager;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Database\QueryException;
 use InvalidArgumentException;
+use Throwable;
 
 class CustomerContractAutomationService
 {
@@ -15,6 +19,7 @@ class CustomerContractAutomationService
      */
     public function __construct(
         private TenantConnectionManager $tenantConnectionManager,
+        private TenantProvisioningService $tenantProvisioningService,
     ) {
     }
 
@@ -33,12 +38,12 @@ class CustomerContractAutomationService
         if ($tenantUuid) {
             $tenant = (clone $query)->where('uuid', $tenantUuid)->firstOrFail();
 
-            return $this->syncTenant($tenant);
+            return $this->syncTenantSafely($tenant);
         }
 
         $query->chunkById($chunk, function ($tenants) use (&$updatedRows) {
             foreach ($tenants as $tenant) {
-                $updatedRows += $this->syncTenant($tenant);
+                $updatedRows += $this->syncTenantSafely($tenant);
             }
         });
 
@@ -107,6 +112,65 @@ class CustomerContractAutomationService
                 return $expiredContracts + $occupiedUnits + $vacantUnits;
             });
         });
+    }
+
+    /**
+     * Sync tenant safely.
+     */
+    private function syncTenantSafely(Tenant $tenant): int
+    {
+        try {
+            return $this->syncTenant($tenant);
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->markTenantFailedIfDatabaseMissing($tenant, $exception);
+
+            return 0;
+        }
+    }
+
+    /**
+     * Mark tenant failed if database missing.
+     */
+    private function markTenantFailedIfDatabaseMissing(Tenant $tenant, Throwable $exception): void
+    {
+        if (!$this->isMissingTenantDatabaseException($exception, $tenant)) {
+            return;
+        }
+
+        Log::error(sprintf(
+            'Workspace "%s" (%s) was marked failed during customer_contract_expiry_sync because its tenant database "%s" could not be found; verify the database exists and then retry provisioning.',
+            $tenant->display_name ?: $tenant->name,
+            $tenant->uuid,
+            $tenant->database
+        ));
+
+        $this->tenantProvisioningService->markFailed(
+            $tenant->id,
+            'Workspace database is missing. Please retry provisioning or contact support.',
+            [
+                'database' => $tenant->database,
+                'source' => 'customer_contract_expiry_sync',
+                'exception_class' => $exception::class,
+            ]
+        );
+    }
+
+    /**
+     * Determine whether missing tenant database exception.
+     */
+    private function isMissingTenantDatabaseException(Throwable $exception, Tenant $tenant): bool
+    {
+        $message = strtolower($exception->getMessage());
+        $database = strtolower((string) $tenant->database);
+
+        if ($exception instanceof QueryException && str_contains($message, 'sqlstate[08006]')) {
+            return str_contains($message, 'does not exist') && ($database === '' || str_contains($message, $database));
+        }
+
+        return str_contains($message, 'database')
+            && str_contains($message, 'does not exist')
+            && ($database === '' || str_contains($message, $database));
     }
 
     /**

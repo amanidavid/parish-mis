@@ -11,7 +11,6 @@ class PropertyMetricsService
         'active',
         'expired',
         'terminated',
-        'renewed',
     ];
 
     /**
@@ -32,7 +31,6 @@ class PropertyMetricsService
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'active' THEN 1 ELSE 0 END) as active_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'expired' THEN 1 ELSE 0 END) as expired_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'renewed' THEN 1 ELSE 0 END) as renewed_contracts_count")
             ->first();
 
         $contractStatuses = [];

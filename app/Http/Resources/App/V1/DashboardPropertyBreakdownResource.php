@@ -30,7 +30,6 @@ class DashboardPropertyBreakdownResource extends ApiJsonResource
                 'active' => (int) ($this->contracts_active ?? 0),
                 'expired' => (int) ($this->contracts_expired ?? 0),
                 'terminated' => (int) ($this->contracts_terminated ?? 0),
-                'renewed' => (int) ($this->contracts_renewed ?? 0),
             ],
         ];
     }

@@ -4,6 +4,7 @@ namespace App\Services\V1\Billing;
 
 use App\Models\Landlord\AutomationTaskRun;
 use App\Models\Landlord\AutomationTaskSetting;
+use App\Services\V1\Occupancy\ContractAlertService;
 use App\Services\V1\Occupancy\CustomerContractAutomationService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Carbon;
@@ -18,6 +19,7 @@ class PropertySubscriptionAutomationService
     public function __construct(
         private PropertySubscriptionService $propertySubscriptionService,
         private CustomerContractAutomationService $customerContractAutomationService,
+        private ContractAlertService $contractAlertService,
     ) {
     }
 
@@ -146,14 +148,16 @@ class PropertySubscriptionAutomationService
                 $rowsAffected = match ($taskSetting->task_key) {
                     AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $this->propertySubscriptionService->syncExpiredPropertySubscriptions(),
                     AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $this->customerContractAutomationService->syncReadyTenants(),
+                    AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => $this->contractAlertService->syncReadyTenants(),
                     default => throw new InvalidArgumentException('Unsupported automation task.'),
                 };
 
                 $message = $this->successMessageForTask($taskSetting->task_key, $rowsAffected);
             }
         } catch (\Throwable $exception) {
+            report($exception);
             $status = AutomationTaskRun::STATUS_FAILED;
-            $message = $exception->getMessage();
+            $message = $this->failureMessageForTask($taskSetting->task_key);
         }
 
         return DB::connection('base')->transaction(function () use ($taskSetting, $startedAt, $rowsAffected, $status, $message) {
@@ -240,6 +244,16 @@ class PropertySubscriptionAutomationService
                 'next_run_at' => now()->addMinutes(15),
                 'meta' => ['supports_run_now' => true],
             ],
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => [
+                'name' => 'Contract Alerts',
+                'description' => 'Sends expiring soon and expired contract alerts to occupants and contract supervisors.',
+                'enabled' => true,
+                'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
+                'interval_minutes' => 15,
+                'timezone' => 'Africa/Nairobi',
+                'next_run_at' => now()->addMinutes(15),
+                'meta' => ['supports_run_now' => true],
+            ],
         ];
     }
 
@@ -255,7 +269,23 @@ class PropertySubscriptionAutomationService
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $rowsAffected > 0
                 ? sprintf('Automation task completed successfully. %d property subscription rows were updated.', $rowsAffected)
                 : 'Automation task completed successfully. No property subscription rows required updating.',
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => $rowsAffected > 0
+                ? sprintf('Automation task completed successfully. %d contract alerts were sent.', $rowsAffected)
+                : 'Automation task completed successfully. No contract alerts were due.',
             default => 'Automation task completed successfully.',
+        };
+    }
+
+    /**
+     * Failure message for task.
+     */
+    private function failureMessageForTask(string $taskKey): string
+    {
+        return match ($taskKey) {
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => 'Contract alerts could not be processed at the moment. Please check the notification configuration and try again.',
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => 'Customer contract expiry sync could not be completed at the moment. Please try again shortly.',
+            AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => 'Property subscription expiry sync could not be completed at the moment. Please try again shortly.',
+            default => 'Automation task could not be completed at the moment. Please try again shortly.',
         };
     }
 

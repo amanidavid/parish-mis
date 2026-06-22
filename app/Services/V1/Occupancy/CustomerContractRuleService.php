@@ -11,7 +11,8 @@ use Illuminate\Support\Carbon;
 class CustomerContractRuleService
 {
     public const OPEN_ENDED_CONTRACT_END_DATE = '9999-12-31';
-    public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active', 'renewed'];
+    public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active'];
+    public const OVERLAP_BLOCKING_CONTRACT_STATUSES = ['draft', 'active'];
 
     /**
      * Handle find duplicate customer.
@@ -77,6 +78,7 @@ class CustomerContractRuleService
     {
         $query = CustomerContract::query()
             ->where('unit_id', $unitId)
+            ->whereIn('status', self::OVERLAP_BLOCKING_CONTRACT_STATUSES)
             ->whereDate('start_date', '<=', $endDate ?? self::OPEN_ENDED_CONTRACT_END_DATE)
             ->where(function (Builder $innerQuery) use ($startDate) {
                 $innerQuery

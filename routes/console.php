@@ -4,6 +4,7 @@ use App\Models\Landlord\AutomationTaskSetting;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertySubscriptionAutomationService;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
+use App\Services\V1\Occupancy\ContractAlertService;
 use App\Support\Tenancy\TenantConnectionManager;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -156,6 +157,20 @@ Artisan::command('contracts:sync-statuses {--force}', function () {
     return self::SUCCESS;
 })->purpose('Update expired customer contracts and refresh unit occupancy across ready tenant databases');
 
+Artisan::command('contracts:send-alerts {--tenant=} {--chunk=20}', function () {
+    $tenantUuid = $this->option('tenant');
+    $chunkSize = max((int) $this->option('chunk'), 1);
+
+    $alertsSent = app(ContractAlertService::class)->syncReadyTenants(
+        $tenantUuid ? (string) $tenantUuid : null,
+        $chunkSize
+    );
+
+    $this->info(sprintf('Contract alert sync completed. Alerts sent: %d', $alertsSent));
+
+    return self::SUCCESS;
+})->purpose('Send expiring soon and expired contract alerts across ready tenant databases');
+
 Artisan::command('billing:run-automation', function () {
     $executed = app(PropertySubscriptionAutomationService::class)->runDueTasks();
 
@@ -164,4 +179,4 @@ Artisan::command('billing:run-automation', function () {
     return self::SUCCESS;
 })->purpose('Run due billing automation tasks');
 
-// Schedule::command('billing:run-automation')->everyMinute();
+Schedule::command('billing:run-automation')->everyMinute();

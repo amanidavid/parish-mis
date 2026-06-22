@@ -245,7 +245,7 @@ class MaintenanceExpenseController extends Controller
     private function resolveMaintenanceJobByUuid(string $uuid): ?MaintenanceJob
     {
         return MaintenanceJob::query()
-            ->select(['id', 'uuid', 'property_id', 'property_floor_id', 'unit_id', 'title', 'reported_date'])
+            ->select(['id', 'uuid', 'property_id', 'property_floor_id', 'unit_id', 'title', 'status', 'reported_date'])
             ->where('uuid', $uuid)
             ->first();
     }
