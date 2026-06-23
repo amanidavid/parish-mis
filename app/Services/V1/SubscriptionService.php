@@ -365,8 +365,7 @@ class SubscriptionService
      */
     public function assertWorkspaceAllowsInventoryMutation(Tenant $tenant): void
     {
-        $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
-        $accessState = $this->determineWorkspaceAccessState($tenant, $subscriptionState);
+        $accessState = $this->workspaceAccessState($tenant);
 
         if (!$accessState['inventory_changes_allowed']) {
             throw new HttpResponseException(
@@ -380,6 +379,16 @@ class SubscriptionService
                 ], 422)
             );
         }
+    }
+
+    /**
+     * Resolve workspace access state.
+     */
+    public function workspaceAccessState(Tenant $tenant): array
+    {
+        $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
+
+        return $this->determineWorkspaceAccessState($tenant, $subscriptionState);
     }
 
     /**

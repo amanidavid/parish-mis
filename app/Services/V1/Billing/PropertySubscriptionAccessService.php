@@ -47,6 +47,91 @@ class PropertySubscriptionAccessService
     }
 
     /**
+     * Build property access summary.
+     */
+    public function accessSummary(Tenant $tenant, Property $property): array
+    {
+        $workspaceAccess = $this->subscriptionService->workspaceAccessState($tenant);
+        $workspaceProperty = $this->workspacePropertyRegistryService->resolveWorkspacePropertyForModel($tenant, $property);
+        $trialEndsOn = $this->activeWorkspaceTrialEndsOn($tenant);
+        $subscription = $workspaceProperty?->subscription;
+        $subscriptionStatus = $subscription?->effectiveStatus() ?? PropertySubscription::STATUS_UNSUBSCRIBED;
+
+        $propertySubscriptionAccess = [
+            'allowed' => false,
+            'reason_code' => 'property_subscription_required',
+            'message' => 'Property subscription access is required.',
+            'subscription_status' => $subscriptionStatus,
+            'payment_required_now' => true,
+            'trial_ends_on' => $trialEndsOn?->toDateString(),
+            'current_period_ends_on' => $subscription?->current_period_ends_on?->toDateString(),
+            'expired_on' => $subscription?->expired_on?->toDateString(),
+        ];
+
+        if (!$workspaceProperty || $workspaceProperty->property_deleted_at) {
+            $propertySubscriptionAccess = [
+                ...$propertySubscriptionAccess,
+                'reason_code' => 'property_unavailable',
+                'message' => 'This property is no longer available.',
+                'subscription_status' => null,
+                'payment_required_now' => false,
+            ];
+        } elseif ($trialEndsOn !== null) {
+            $propertySubscriptionAccess = [
+                'allowed' => true,
+                'reason_code' => 'workspace_trial_active',
+                'message' => 'Workspace trial access is active. Property subscription payment will be required after the trial ends.',
+                'subscription_status' => $subscriptionStatus,
+                'payment_required_now' => false,
+                'trial_ends_on' => $trialEndsOn->toDateString(),
+                'current_period_ends_on' => $subscription?->current_period_ends_on?->toDateString(),
+                'expired_on' => $subscription?->expired_on?->toDateString(),
+            ];
+        } elseif ($subscription && $subscriptionStatus === PropertySubscription::STATUS_ACTIVE) {
+            $propertySubscriptionAccess = [
+                'allowed' => true,
+                'reason_code' => null,
+                'message' => null,
+                'subscription_status' => $subscriptionStatus,
+                'payment_required_now' => false,
+                'trial_ends_on' => null,
+                'current_period_ends_on' => $subscription->current_period_ends_on?->toDateString(),
+                'expired_on' => $subscription->expired_on?->toDateString(),
+            ];
+        } elseif ($subscriptionStatus === PropertySubscription::STATUS_EXPIRED) {
+            $propertySubscriptionAccess = [
+                ...$propertySubscriptionAccess,
+                'reason_code' => 'property_subscription_expired',
+                'message' => 'Property subscription access is required. The current property subscription has expired.',
+            ];
+        }
+
+        $operationsAllowed = (bool) ($workspaceAccess['inventory_changes_allowed'] ?? false)
+            && (bool) ($propertySubscriptionAccess['allowed'] ?? false);
+
+        $operationsReasonCode = $workspaceAccess['inventory_changes_allowed'] ?? false
+            ? ($propertySubscriptionAccess['reason_code'] ?? null)
+            : 'workspace_access_required';
+        $operationsMessage = $workspaceAccess['inventory_changes_allowed'] ?? false
+            ? ($propertySubscriptionAccess['message'] ?? null)
+            : ($workspaceAccess['message'] ?? 'Workspace access is restricted at the moment.');
+
+        return [
+            'workspace' => [
+                'state' => $workspaceAccess['state'] ?? null,
+                'message' => $workspaceAccess['message'] ?? null,
+                'inventory_changes_allowed' => (bool) ($workspaceAccess['inventory_changes_allowed'] ?? false),
+            ],
+            'property_subscription' => $propertySubscriptionAccess,
+            'operations' => [
+                'allowed' => $operationsAllowed,
+                'reason_code' => $operationsReasonCode,
+                'message' => $operationsMessage,
+            ],
+        ];
+    }
+
+    /**
      * Assert contract start date covered.
      */
     public function assertContractStartDateCovered(Tenant $tenant, Property $property, CarbonInterface|string $contractStartDate): void
