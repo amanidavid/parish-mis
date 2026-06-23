@@ -378,18 +378,20 @@ class SubscriptionService
     /**
      * Assert workspace allows inventory mutation.
      */
-    public function assertWorkspaceAllowsInventoryMutation(Tenant $tenant): void
+    public function assertWorkspaceAllowsInventoryMutation(Tenant $tenant, array $messageOverrides = []): void
     {
         $accessState = $this->workspaceAccessState($tenant);
 
         if (!$accessState['inventory_changes_allowed']) {
+            $message = $messageOverrides[$accessState['state'] ?? ''] ?? $accessState['message'];
+
             throw new HttpResponseException(
                 response()->json([
                     'success' => false,
-                    'message' => $accessState['message'],
+                    'message' => $message,
                     'data' => null,
                     'errors' => [
-                        'workspace' => [$accessState['message']],
+                        'workspace' => [$message],
                     ],
                 ], 422)
             );

@@ -166,6 +166,7 @@ Route::prefix('v1')->group(function () {
                         ->parameters(['expenses' => 'maintenanceExpense']);
                 });
                 Route::apiResource('customers', CustomerController::class);
+                Route::get('customer-contracts/next-number', [CustomerContractController::class, 'nextNumber']);
                 Route::apiResource('customer-contracts', CustomerContractController::class);
                 Route::apiResource('staff-property-assignments', StaffPropertyAssignmentController::class);
                 Route::apiResource('staff-users', TenantUserController::class)

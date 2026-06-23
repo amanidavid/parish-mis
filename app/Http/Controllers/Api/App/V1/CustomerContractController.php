@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\App\V1;
 use App\Http\Controllers\Api\App\V1\Concerns\InteractsWithTenantModels;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\CustomerContractIndexRequest;
+use App\Http\Requests\Api\App\V1\CustomerContractNextNumberRequest;
 use App\Http\Requests\Api\App\V1\StoreCustomerContractRequest;
 use App\Http\Requests\Api\App\V1\UpdateCustomerContractRequest;
 use App\Http\Resources\App\V1\CustomerContractResource;
@@ -102,6 +103,47 @@ class CustomerContractController extends Controller
         $contracts = $query->paginate((int) ($filters['per_page'] ?? 15));
 
         return ApiResponse::resource(CustomerContractResource::collection($contracts), ApiMessages::listRetrieved('customer contracts'));
+    }
+
+    /**
+     * Handle next contract number request.
+     */
+    public function nextNumber(CustomerContractNextNumberRequest $request)
+    {
+        $this->authorize('create', CustomerContract::class);
+
+        $data = $request->validated();
+        $unit = $this->resolveModelByUuid(Unit::class, $data['unit_uuid']);
+
+        if (!$unit) {
+            return ApiResponse::error('Unit not found', ['unit_uuid' => ['Invalid unit identifier']], 422);
+        }
+
+        $unit->loadMissing('propertyFloor.property');
+
+        if (!$unit->propertyFloor || !$unit->propertyFloor->property) {
+            return ApiResponse::error(
+                'Unit property not found',
+                ['unit_uuid' => ['The selected unit is not attached to a valid property.']],
+                422
+            );
+        }
+
+        if ($response = $this->ensureUserCanAccessProperty($unit->propertyFloor->property)) {
+            return $response;
+        }
+
+        $startDate = (string) ($data['start_date'] ?? Carbon::today()->toDateString());
+
+        return ApiResponse::success('Next contract number generated successfully.', [
+            'next_number' => $this->generateContractNumber(
+                (int) $unit->propertyFloor->property->id,
+                $startDate
+            ),
+            'unit_uuid' => $unit->uuid,
+            'property_uuid' => $unit->propertyFloor->property->uuid,
+            'start_date' => $startDate,
+        ]);
     }
 
     /**
@@ -419,6 +461,6 @@ class CustomerContractController extends Controller
             $nextSequence = ((int) $matches[1]) + 1;
         }
 
-        return sprintf('CNT-%s-%d-%03d', $year, $propertyId, $nextSequence);
+        return sprintf('CNT-%s-%d-%d', $year, $propertyId, $nextSequence);
     }
 }
