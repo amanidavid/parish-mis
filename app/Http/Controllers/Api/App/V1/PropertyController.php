@@ -120,6 +120,7 @@ class PropertyController extends Controller
 
         $this->applySort($query, $filters['sort'] ?? null, ['name', 'created_at'], 'name', 'asc');
         $properties = $query->paginate((int) ($filters['per_page'] ?? 15));
+        $this->attachPropertyListSubscriptionSnapshots($properties);
 
         return ApiResponse::resource(PropertyResource::collection($properties), 'Properties list');
     }
@@ -545,5 +546,41 @@ class PropertyController extends Controller
         );
 
         return $property;
+    }
+
+    /**
+     * Attach property list subscription snapshots.
+     */
+    private function attachPropertyListSubscriptionSnapshots($paginator): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if (!$tenant instanceof Tenant) {
+            return;
+        }
+
+        $collection = $paginator->getCollection();
+        $snapshots = $this->propertySubscriptionAccessService->propertyListSnapshotMap($tenant, $collection);
+
+        $collection->transform(function (Property $property) use ($snapshots) {
+            $snapshot = $snapshots[$property->uuid] ?? null;
+
+            if (!$snapshot) {
+                return $property;
+            }
+
+            $property->setAttribute('property_status', $snapshot['property_status'] ?? $property->status);
+            $property->setAttribute('subscription_status', $snapshot['subscription_status'] ?? null);
+            $property->setAttribute('subscription_message', $snapshot['subscription_message'] ?? null);
+            $property->setAttribute('subscription_reason_code', $snapshot['subscription_reason_code'] ?? null);
+            $property->setAttribute('payment_required_now', (bool) ($snapshot['payment_required_now'] ?? false));
+            $property->setAttribute('operations_allowed', (bool) ($snapshot['operations_allowed'] ?? false));
+            $property->setAttribute('operations_message', $snapshot['operations_message'] ?? null);
+            $property->setAttribute('operations_reason_code', $snapshot['operations_reason_code'] ?? null);
+            $property->setAttribute('subscription_current_period_ends_on', $snapshot['current_period_ends_on'] ?? null);
+            $property->setAttribute('subscription_expired_on', $snapshot['expired_on'] ?? null);
+
+            return $property;
+        });
     }
 }

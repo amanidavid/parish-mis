@@ -81,6 +81,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('tenants/{tenant}/usage-adjustments', [TenantSubscriptionUsageAdjustmentController::class, 'index']);
                 Route::post('tenants/{tenant}/usage-adjustments/{usageAdjustment}/apply', [TenantSubscriptionUsageAdjustmentController::class, 'apply']);
                 Route::post('tenants/{tenant}/usage-adjustments/{usageAdjustment}/waive', [TenantSubscriptionUsageAdjustmentController::class, 'waive']);
+                Route::post('tenants/{tenant}/billing-rule/preview', [TenantController::class, 'previewBillingRuleChange']);
+                Route::patch('tenants/{tenant}/billing-rule', [TenantController::class, 'assignBillingRule']);
                 Route::post('tenants/{tenant}/billing-profile/preview', [TenantController::class, 'previewBillingProfileChange']);
                 Route::patch('tenants/{tenant}/billing-profile', [TenantController::class, 'assignBillingProfile']);
                 Route::patch('tenants/{tenant}/status', [TenantController::class, 'updateStatus']);

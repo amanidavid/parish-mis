@@ -41,6 +41,43 @@ class PropertyResource extends ApiJsonResource
                 ] : null,
             ],
             'status' => $this->status,
+            'property_status' => $this->property_status ?? $this->status,
+            'subscription_status' => $this->when(
+                $this->resource->offsetExists('subscription_status'),
+                fn () => $this->subscription_status
+            ),
+            'subscription_message' => $this->when(
+                $this->resource->offsetExists('subscription_message'),
+                fn () => $this->subscription_message
+            ),
+            'subscription_reason_code' => $this->when(
+                $this->resource->offsetExists('subscription_reason_code'),
+                fn () => $this->subscription_reason_code
+            ),
+            'payment_required_now' => $this->when(
+                $this->resource->offsetExists('payment_required_now'),
+                fn () => (bool) $this->payment_required_now
+            ),
+            'operations_allowed' => $this->when(
+                $this->resource->offsetExists('operations_allowed'),
+                fn () => (bool) $this->operations_allowed
+            ),
+            'operations_message' => $this->when(
+                $this->resource->offsetExists('operations_message'),
+                fn () => $this->operations_message
+            ),
+            'operations_reason_code' => $this->when(
+                $this->resource->offsetExists('operations_reason_code'),
+                fn () => $this->operations_reason_code
+            ),
+            'subscription_current_period_ends_on' => $this->when(
+                $this->resource->offsetExists('subscription_current_period_ends_on'),
+                fn () => $this->subscription_current_period_ends_on
+            ),
+            'subscription_expired_on' => $this->when(
+                $this->resource->offsetExists('subscription_expired_on'),
+                fn () => $this->subscription_expired_on
+            ),
             'floors_count' => $this->whenCounted('floors'),
             'units_count' => $this->whenCounted('units'),
             'occupied_count' => $this->when(

@@ -15,6 +15,19 @@ class ContractAlertRecipientResolver
      */
     public function resolveForProperties(array $propertyIds): array
     {
+        return $this->resolveForPropertiesWithPermissions(
+            $propertyIds,
+            (array) config('contract_alerts.staff_permissions', [])
+        );
+    }
+
+    /**
+     * Resolve property alert recipients with permissions.
+     *
+     * @return array<int, array<int, array<string, mixed>>>
+     */
+    public function resolveForPropertiesWithPermissions(array $propertyIds, array $permissionNames): array
+    {
         $propertyIds = collect($propertyIds)
             ->map(fn ($propertyId) => (int) $propertyId)
             ->filter(fn (int $propertyId) => $propertyId > 0)
@@ -26,7 +39,6 @@ class ContractAlertRecipientResolver
             return [];
         }
 
-        $permissionNames = config('contract_alerts.staff_permissions', []);
         if (!is_array($permissionNames) || $permissionNames === []) {
             return array_fill_keys($propertyIds, []);
         }
