@@ -92,6 +92,8 @@ class WorkspacePropertySubscriptionResource extends ApiJsonResource
             'monthly_price_cents' => (int) $payment->monthly_price_cents,
             'total_amount_cents' => (int) $payment->total_amount_cents,
             'currency' => $payment->currency,
+            'monthly_price_formatted' => $this->formatMoneyFromCents((int) $payment->monthly_price_cents, $payment->currency),
+            'total_amount_formatted' => $this->formatMoneyFromCents((int) $payment->total_amount_cents, $payment->currency),
             'reference_number' => $payment->reference_number,
             'billing_rule' => $payment->billingRule ? [
                 'uuid' => $payment->billingRule->uuid,
@@ -99,6 +101,10 @@ class WorkspacePropertySubscriptionResource extends ApiJsonResource
                 'range_end' => $payment->billingRule->range_end !== null ? (int) $payment->billingRule->range_end : null,
                 'price_cents' => (int) $payment->billingRule->price_cents,
                 'currency' => $payment->billingRule->profile?->currency ?? $payment->currency,
+                'price_formatted' => $this->formatMoneyFromCents(
+                    (int) $payment->billingRule->price_cents,
+                    $payment->billingRule->profile?->currency ?? $payment->currency
+                ),
                 'billing_profile' => $payment->billingRule->profile ? [
                     'uuid' => $payment->billingRule->profile->uuid,
                     'name' => $payment->billingRule->profile->name,

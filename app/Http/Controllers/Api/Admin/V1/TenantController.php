@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin\V1;
 
 use App\Http\Controllers\Api\Admin\V1\Concerns\InteractsWithTenantAdminModels;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\Admin\V1\AssignTenantBillingRuleRequest;
 use App\Http\Requests\Api\Admin\V1\TenantIndexRequest;
 use App\Http\Requests\Api\Admin\V1\AssignTenantBillingProfileRequest;
 use App\Http\Requests\Api\Admin\V1\TenantContractsSummaryRequest;
@@ -22,6 +23,7 @@ use App\Http\Resources\App\V1\TenantUserResource;
 use App\Http\Resources\App\V1\WorkspaceSubscriptionPropertyResource;
 use App\Http\Resources\App\V1\WorkspaceSubscriptionResource;
 use App\Models\Landlord\BaseUser;
+use App\Models\Landlord\BillingRule;
 use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenant\User;
@@ -464,6 +466,41 @@ class TenantController extends Controller
         return ApiResponse::success('Workspace billing profile change preview generated successfully.', $preview);
     }
 
+    /**
+     * Handle preview billing rule change.
+     */
+    public function previewBillingRuleChange(AssignTenantBillingRuleRequest $request, Tenant $tenant)
+    {
+        $billingRule = $this->resolveBillingRuleForWorkspaceChange($request->validated('billing_rule_uuid'));
+
+        if (!$billingRule) {
+            return ApiResponse::error(
+                'Billing rule preview failed.',
+                ['billing_rule_uuid' => ['The selected billing rule could not be found.']],
+                422
+            );
+        }
+
+        try {
+            $preview = $this->subscriptionBillingProfileChangeService->preview(
+                $tenant,
+                $billingRule->profile,
+                $request->validated()
+            );
+        } catch (InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                'Billing rule preview failed.',
+                ['billing_rule' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        return ApiResponse::success(
+            'Workspace billing rule change preview generated successfully.',
+            $this->formatBillingRulePreview($preview, $billingRule)
+        );
+    }
+
     /** Apply a billing profile change immediately or schedule it for the next billing cycle. */
     /**
      * Handle assign billing profile.
@@ -497,6 +534,41 @@ class TenantController extends Controller
     }
 
     /**
+     * Handle assign billing rule.
+     */
+    public function assignBillingRule(AssignTenantBillingRuleRequest $request, Tenant $tenant)
+    {
+        $billingRule = $this->resolveBillingRuleForWorkspaceChange($request->validated('billing_rule_uuid'));
+
+        if (!$billingRule) {
+            return ApiResponse::error(
+                'Billing rule assignment failed.',
+                ['billing_rule_uuid' => ['The selected billing rule could not be found.']],
+                422
+            );
+        }
+
+        try {
+            $this->subscriptionBillingProfileChangeService->apply(
+                $tenant,
+                $billingRule->profile,
+                $request->validated()
+            );
+        } catch (InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                'Billing rule assignment failed.',
+                ['billing_rule' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        return ApiResponse::resource(
+            new WorkspaceSubscriptionResource($this->subscriptionService->getWorkspaceSubscriptionSummary($tenant->fresh())),
+            'Workspace billing rule assigned successfully.'
+        );
+    }
+
+    /**
      * Map workspace creation error.
      */
     private function mapWorkspaceCreationError(string $message): array
@@ -512,6 +584,77 @@ class TenantController extends Controller
                 'tenant' => ['Please review the submitted workspace details and try again.'],
             ],
         };
+    }
+
+    /**
+     * Resolve billing rule for workspace change.
+     */
+    private function resolveBillingRuleForWorkspaceChange(?string $billingRuleUuid): ?BillingRule
+    {
+        if (!$billingRuleUuid) {
+            return null;
+        }
+
+        return BillingRule::query()
+            ->with('profile:id,uuid,name,billing_interval,currency,status')
+            ->where('uuid', $billingRuleUuid)
+            ->where('status', 'active')
+            ->first();
+    }
+
+    /**
+     * Format billing rule.
+     */
+    private function formatBillingRule(BillingRule $billingRule): array
+    {
+        return [
+            'uuid' => $billingRule->uuid,
+            'range_start' => (int) $billingRule->range_start,
+            'range_end' => $billingRule->range_end !== null ? (int) $billingRule->range_end : null,
+            'price_cents' => (int) $billingRule->price_cents,
+            'currency' => $billingRule->currency,
+            'effective_from' => $billingRule->effective_from?->toDateString(),
+            'effective_to' => $billingRule->effective_to?->toDateString(),
+            'status' => $billingRule->status,
+            'billing_profile' => $billingRule->profile ? [
+                'uuid' => $billingRule->profile->uuid,
+                'name' => $billingRule->profile->name,
+                'billing_interval' => $billingRule->profile->billing_interval,
+                'currency' => $billingRule->profile->currency,
+                'status' => $billingRule->profile->status,
+            ] : null,
+        ];
+    }
+
+    /**
+     * Format billing rule preview.
+     */
+    private function formatBillingRulePreview(array $preview, BillingRule $billingRule): array
+    {
+        $pendingChange = $preview['pending_change'] ?? null;
+
+        return [
+            'workspace_uuid' => $preview['workspace_uuid'] ?? null,
+            'subscription_uuid' => $preview['subscription_uuid'] ?? null,
+            'subscription_status' => $preview['subscription_status'] ?? null,
+            'change_timing' => $preview['change_timing'] ?? null,
+            'effective_at' => $preview['effective_at'] ?? null,
+            'current_period_starts_at' => $preview['current_period_starts_at'] ?? null,
+            'current_period_ends_at' => $preview['current_period_ends_at'] ?? null,
+            'selected_billing_rule' => $this->formatBillingRule($billingRule),
+            'pending_change' => is_array($pendingChange) ? [
+                'uuid' => $pendingChange['uuid'] ?? null,
+                'status' => $pendingChange['status'] ?? null,
+                'change_timing' => $pendingChange['change_timing'] ?? null,
+                'effective_at' => $pendingChange['effective_at'] ?? null,
+                'applied_at' => $pendingChange['applied_at'] ?? null,
+                'current_price_cents' => $pendingChange['current_price_cents'] ?? null,
+                'new_price_cents' => $pendingChange['new_price_cents'] ?? null,
+                'prorated_adjustment_cents' => $pendingChange['prorated_adjustment_cents'] ?? null,
+            ] : null,
+            'pricing' => $preview['pricing'] ?? null,
+            'proration' => $preview['proration'] ?? null,
+        ];
     }
 
     /**

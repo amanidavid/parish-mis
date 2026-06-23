@@ -9,6 +9,8 @@ class WorkspacePropertySubscriptionPaymentResource extends ApiJsonResource
 {
     public function toArray(Request $request): array
     {
+        $currency = $this->currency;
+
         return [
             'uuid' => $this->uuid,
             'months_paid' => (int) $this->months_paid,
@@ -16,7 +18,9 @@ class WorkspacePropertySubscriptionPaymentResource extends ApiJsonResource
             'rule_range_end' => $this->rule_range_end !== null ? (int) $this->rule_range_end : null,
             'monthly_price_cents' => (int) $this->monthly_price_cents,
             'total_amount_cents' => (int) $this->total_amount_cents,
-            'currency' => $this->currency,
+            'currency' => $currency,
+            'monthly_price_formatted' => $this->formatMoneyFromCents((int) $this->monthly_price_cents, $currency),
+            'total_amount_formatted' => $this->formatMoneyFromCents((int) $this->total_amount_cents, $currency),
             'payment_date' => optional($this->payment_date)->toDateString(),
             'coverage_starts_on' => optional($this->coverage_starts_on)->toDateString(),
             'coverage_ends_on' => optional($this->coverage_ends_on)->toDateString(),
@@ -44,7 +48,11 @@ class WorkspacePropertySubscriptionPaymentResource extends ApiJsonResource
                 'range_start' => (int) $this->billingRule->range_start,
                 'range_end' => $this->billingRule->range_end !== null ? (int) $this->billingRule->range_end : null,
                 'price_cents' => (int) $this->billingRule->price_cents,
-                'currency' => $this->billingRule->profile?->currency ?? $this->currency,
+                'currency' => $this->billingRule->profile?->currency ?? $currency,
+                'price_formatted' => $this->formatMoneyFromCents(
+                    (int) $this->billingRule->price_cents,
+                    $this->billingRule->profile?->currency ?? $currency
+                ),
                 'billing_profile' => $this->billingRule->profile ? [
                     'uuid' => $this->billingRule->profile->uuid,
                     'name' => $this->billingRule->profile->name,

@@ -284,7 +284,7 @@ class ContractAlertService
 
         return $this->baseContractQuery()
             ->where('customer_contracts.status', 'expired')
-            ->whereDate('customer_contracts.end_date', '<', $today);
+            ->whereDate('customer_contracts.end_date', '=', $today);
     }
 
     /**

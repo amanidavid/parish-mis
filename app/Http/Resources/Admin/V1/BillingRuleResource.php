@@ -13,7 +13,7 @@ class BillingRuleResource extends ApiJsonResource
         $unitRangeLabel = $rangeEnd === null
             ? sprintf('%d+ units', (int) $this->range_start)
             : sprintf('%d-%d units', (int) $this->range_start, $rangeEnd);
-        $priceLabel = sprintf('%s %s / month', strtoupper((string) $this->currency), number_format((int) $this->price_cents));
+        $formattedPrice = $this->formatMoneyFromCents((int) $this->price_cents, $this->currency);
 
         return [
             'uuid' => $this->uuid,
@@ -21,14 +21,14 @@ class BillingRuleResource extends ApiJsonResource
             'range_end' => $rangeEnd,
             'price_cents' => $this->price_cents,
             'currency' => $this->currency,
+            'price_formatted' => $formattedPrice,
             'effective_from' => $this->effective_from?->toDateString(),
             'effective_to' => $this->effective_to?->toDateString(),
             'sort_order' => $this->sort_order,
             'status' => $this->status,
             'unit_range_label' => $unitRangeLabel,
-            'price_label' => $priceLabel,
-            'display_name' => sprintf('%s - %s', $unitRangeLabel, $priceLabel),
-            'name' => sprintf('%s - %s', $unitRangeLabel, $priceLabel),
+            'display_name' => sprintf('%s - %s / month', $unitRangeLabel, $formattedPrice),
+            'name' => sprintf('%s - %s / month', $unitRangeLabel, $formattedPrice),
             'billing_profile' => $this->whenLoaded('profile', fn () => [
                 'uuid' => $this->profile?->uuid,
                 'name' => $this->profile?->name,

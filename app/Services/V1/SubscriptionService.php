@@ -3,8 +3,10 @@
 namespace App\Services\V1;
 
 use App\Models\Landlord\BillingProfile;
+use App\Models\Landlord\PropertySubscription;
 use App\Models\Landlord\Plan;
 use App\Models\Landlord\Subscription;
+use App\Models\Landlord\WorkspaceProperty;
 use App\Models\Landlord\SubscriptionProfileChange;
 use App\Models\Landlord\SubscriptionUsageAdjustment;
 use App\Models\Landlord\SubscriptionUsage;
@@ -284,10 +286,19 @@ class SubscriptionService
                 ->paginate((int) ($filters['per_page'] ?? 15))
                 ->withQueryString();
 
-            $paginator->getCollection()->transform(function (Property $property) use ($billingProfile, $rules) {
+            $propertySubscriptions = WorkspaceProperty::query()
+                ->with(['subscription:id,workspace_property_id,status,current_period_ends_on'])
+                ->where('tenant_id', $tenant->id)
+                ->whereIn('property_uuid', $paginator->getCollection()->pluck('uuid')->all())
+                ->get()
+                ->keyBy('property_uuid');
+
+            $paginator->getCollection()->transform(function (Property $property) use ($billingProfile, $rules, $propertySubscriptions) {
                 $rule = $billingProfile
                     ? $this->billingProfileService->matchingRuleFromCollection($rules, (int) $property->registered_units)
                     : null;
+                $workspaceProperty = $propertySubscriptions->get($property->uuid);
+                $propertySubscription = $workspaceProperty?->subscription;
 
                 $property->setAttribute('matched_rule', $rule ? [
                     'uuid' => $rule->uuid,
@@ -299,6 +310,10 @@ class SubscriptionService
                     'effective_to' => $rule->effective_to?->toDateString(),
                 ] : null);
                 $property->setAttribute('estimated_price_cents', $rule?->price_cents ?? 0);
+                $property->setAttribute(
+                    'subscription_status',
+                    $propertySubscription?->effectiveStatus() ?? PropertySubscription::STATUS_UNSUBSCRIBED
+                );
 
                 return $property;
             });
