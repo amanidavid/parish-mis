@@ -12,12 +12,16 @@ use App\Models\Tenant\Customer;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
+use App\Models\Tenancy\Tenant;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
+use App\Services\V1\Billing\PropertySubscriptionAccessService;
 use App\Services\V1\PropertyAssignmentAccessService;
+use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 class CustomerController extends Controller
 {
@@ -29,6 +33,8 @@ class CustomerController extends Controller
     public function __construct(
         private CustomerContractRuleService $ruleService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+        private PropertySubscriptionAccessService $propertySubscriptionAccessService,
+        private SubscriptionService $subscriptionService,
     ) {
     }
 
@@ -95,6 +101,7 @@ class CustomerController extends Controller
     public function store(StoreCustomerRequest $request)
     {
         $this->authorize('create', Customer::class);
+        $this->assertWorkspaceAllowsInventoryMutation();
 
         $data = $request->validated();
         $property = $this->resolveModelByUuid(Property::class, $data['property_uuid']);
@@ -104,6 +111,10 @@ class CustomerController extends Controller
 
         if ($response = $this->ensureUserCanAccessProperty($property)) {
             return $response;
+        }
+
+        if ($error = $this->assertPropertyAllowsCustomerOperations($property)) {
+            return $error;
         }
 
         $duplicateCustomer = $this->ruleService->findDuplicateCustomer($data, (int) $property->id);
@@ -153,6 +164,7 @@ class CustomerController extends Controller
     public function update(UpdateCustomerRequest $request, Customer $customer)
     {
         $this->authorize('update', $customer);
+        $this->assertWorkspaceAllowsInventoryMutation();
 
         $data = $request->validated();
         $property = $customer->property;
@@ -174,6 +186,10 @@ class CustomerController extends Controller
                     422
                 );
             }
+        }
+
+        if ($property && ($error = $this->assertPropertyAllowsCustomerOperations($property))) {
+            return $error;
         }
 
         $duplicateCustomer = $this->ruleService->findDuplicateCustomer(array_merge([
@@ -220,6 +236,13 @@ class CustomerController extends Controller
     {
         $this->authorize('delete', $customer);
 
+        $this->assertWorkspaceAllowsInventoryMutation();
+        $property = $customer->loadMissing('property')->property;
+
+        if ($property && ($error = $this->assertPropertyAllowsCustomerOperations($property))) {
+            return $error;
+        }
+
         DB::transaction(fn () => $customer->delete());
 
         return ApiResponse::success(ApiMessages::deleted('customer'));
@@ -235,6 +258,40 @@ class CustomerController extends Controller
         if ($tenantUser instanceof TenantUser
             && !$this->propertyAssignmentAccessService->userCanAccessProperty($tenantUser, (int) $property->id)) {
             return ApiResponse::forbidden(['property' => ['You do not have access to the selected property.']]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Assert workspace allows inventory mutation.
+     */
+    private function assertWorkspaceAllowsInventoryMutation(): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
+        }
+    }
+
+    /**
+     * Assert property allows customer operations.
+     */
+    private function assertPropertyAllowsCustomerOperations(Property $property): ?\Illuminate\Http\JsonResponse
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            try {
+                $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, 'customers');
+            } catch (InvalidArgumentException $exception) {
+                return ApiResponse::error(
+                    'Property subscription access is required.',
+                    ['property_subscription' => [$exception->getMessage()]],
+                    422
+                );
+            }
         }
 
         return null;

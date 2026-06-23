@@ -259,7 +259,7 @@ class UnitController extends Controller
         $tenant = request()->attributes->get('tenant');
 
         if ($tenant instanceof Tenant) {
-            $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
+            $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
             if ($captureUsageBaseline) {
                 $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
             }

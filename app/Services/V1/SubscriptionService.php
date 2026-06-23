@@ -365,8 +365,7 @@ class SubscriptionService
      */
     public function assertWorkspaceAllowsInventoryMutation(Tenant $tenant): void
     {
-        $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
-        $accessState = $this->determineWorkspaceAccessState($tenant, $subscriptionState);
+        $accessState = $this->workspaceAccessState($tenant);
 
         if (!$accessState['inventory_changes_allowed']) {
             throw new HttpResponseException(
@@ -376,6 +375,63 @@ class SubscriptionService
                     'data' => null,
                     'errors' => [
                         'workspace' => [$accessState['message']],
+                    ],
+                ], 422)
+            );
+        }
+    }
+
+    /**
+     * Resolve workspace access state.
+     */
+    public function workspaceAccessState(Tenant $tenant): array
+    {
+        $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
+
+        return $this->determineWorkspaceAccessState($tenant, $subscriptionState);
+    }
+
+    /**
+     * Assert workspace allows property-scoped operational mutation.
+     */
+    public function assertWorkspaceAllowsPropertyScopedMutation(Tenant $tenant): void
+    {
+        $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
+
+        if ($tenant->status === 'suspended') {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'This workspace is currently suspended.',
+                    'data' => null,
+                    'errors' => [
+                        'workspace' => ['This workspace is currently suspended.'],
+                    ],
+                ], 422)
+            );
+        }
+
+        if ($tenant->provisioning_status !== 'ready') {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'This workspace is still being prepared.',
+                    'data' => null,
+                    'errors' => [
+                        'workspace' => ['This workspace is still being prepared.'],
+                    ],
+                ], 422)
+            );
+        }
+
+        if (($subscriptionState['status'] ?? null) === 'unconfigured') {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'Workspace billing is not configured yet.',
+                    'data' => null,
+                    'errors' => [
+                        'workspace' => ['Workspace billing is not configured yet.'],
                     ],
                 ], 422)
             );

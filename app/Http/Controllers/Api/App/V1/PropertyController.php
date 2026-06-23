@@ -17,6 +17,7 @@ use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Models\Tenant\Ward;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
+use App\Services\V1\Billing\PropertySubscriptionAccessService;
 use App\Services\V1\PropertyMetricsService;
 use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use App\Services\V1\PropertyAssignmentAccessService;
@@ -38,6 +39,7 @@ class PropertyController extends Controller
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertyMetricsService $propertyMetricsService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
+        private PropertySubscriptionAccessService $propertySubscriptionAccessService,
     )
     {
     }
@@ -523,6 +525,8 @@ class PropertyController extends Controller
      */
     private function loadPropertyDetails(Property $property): Property
     {
+        $tenant = request()->attributes->get('tenant');
+
         $property->load(['type', 'country', 'region.country', 'district.region.country', 'ward'])
             ->loadCount(['floors', 'units']);
 
@@ -533,6 +537,12 @@ class PropertyController extends Controller
         $property->setAttribute('maintenance_count', (int) ($metrics['maintenance_count'] ?? 0));
         $property->setAttribute('contracts_count', (int) ($metrics['contracts_count'] ?? 0));
         $property->setAttribute('contract_statuses', $metrics['contract_statuses'] ?? []);
+        $property->setAttribute(
+            'access',
+            $tenant instanceof Tenant
+                ? $this->propertySubscriptionAccessService->accessSummary($tenant, $property)
+                : null
+        );
 
         return $property;
     }

@@ -7,6 +7,7 @@ use App\Models\Landlord\PropertySubscription;
 use App\Models\Landlord\PropertySubscriptionPayment;
 use App\Models\Landlord\WorkspaceProperty;
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\BillingProfileService;
 use App\Services\V1\SubscriptionService;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -26,6 +27,7 @@ class PropertySubscriptionService
     public function __construct(
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
+        private BillingProfileService $billingProfileService,
         private SubscriptionService $subscriptionService,
     ) {
     }
@@ -65,7 +67,11 @@ class PropertySubscriptionService
             $this->applySubscriptionStatusFilter($query, $filters['subscription_status'], 'property_subscription_sort');
         }
 
-        $this->applyTenantPropertySubscriptionSort($query, $filters['sort'] ?? null);
+        if (array_key_exists('sort', $filters) && !blank($filters['sort'])) {
+            $this->applyTenantPropertySubscriptionSort($query, $filters['sort']);
+        } else {
+            $query->orderByDesc('workspace_properties.id');
+        }
 
         return $query
             ->paginate((int) ($filters['per_page'] ?? 15))
@@ -93,6 +99,10 @@ class PropertySubscriptionService
         $workspaceProperty->setAttribute('payments_count', $workspaceProperty->payments()->count());
         $workspaceProperty->setAttribute('total_paid_amount_cents', (int) $workspaceProperty->payments()->sum('total_amount_cents'));
         $workspaceProperty->setRelation('activePayment', $this->resolveActivePayment($workspaceProperty));
+        $workspaceProperty->setAttribute(
+            'next_billing_preview',
+            $this->buildNextBillingPreview($tenant, $workspaceProperty)
+        );
 
         return $workspaceProperty;
     }
@@ -579,6 +589,77 @@ class PropertySubscriptionService
             'starts_on' => $paymentStart,
             'ends_on' => $paymentEnd,
             'starts_from_payment_date' => $startsFromPaymentDate,
+        ];
+    }
+
+    /**
+     * Build next billing preview.
+     */
+    private function buildNextBillingPreview(Tenant $tenant, WorkspaceProperty $workspaceProperty): ?array
+    {
+        $subscription = $workspaceProperty->subscription;
+        $currentRule = $subscription?->billingRule;
+        $billingProfile = $currentRule?->profile
+            ?? $this->subscriptionService->currentSubscription($tenant)?->billingProfile
+            ?? $this->subscriptionService->resolveWorkspaceBillingProfile($tenant);
+
+        if (!$billingProfile) {
+            return null;
+        }
+
+        $nextPaymentDate = $subscription?->current_period_ends_on
+            ? Carbon::parse($subscription->current_period_ends_on)->addDay()->startOfDay()
+            : Carbon::today();
+        $projectedRule = $this->billingProfileService->matchingRule(
+            $billingProfile,
+            (int) $workspaceProperty->current_registered_units_total,
+            $nextPaymentDate
+        );
+
+        if (!$projectedRule) {
+            return null;
+        }
+
+        $currentMonthlyPriceCents = (int) (
+            $workspaceProperty->getRelation('activePayment')?->monthly_price_cents
+            ?? $workspaceProperty->latestPayment?->monthly_price_cents
+            ?? $currentRule?->price_cents
+            ?? 0
+        );
+        $projectedMonthlyPriceCents = (int) $projectedRule->price_cents;
+        $priceChangeCents = $projectedMonthlyPriceCents - $currentMonthlyPriceCents;
+        $unitsNow = (int) $workspaceProperty->current_registered_units_total;
+        $isOutsideCurrentRule = $currentRule
+            ? $unitsNow < (int) $currentRule->range_start
+                || ($currentRule->range_end !== null && $unitsNow > (int) $currentRule->range_end)
+            : false;
+
+        return [
+            'payment_due_on' => $nextPaymentDate->toDateString(),
+            'current_registered_units_total' => $unitsNow,
+            'current_monthly_price_cents' => $currentMonthlyPriceCents,
+            'projected_monthly_price_cents' => $projectedMonthlyPriceCents,
+            'price_change_cents' => $priceChangeCents,
+            'currency' => $projectedRule->profile?->currency ?? $billingProfile->currency ?? 'TZS',
+            'has_price_change' => $priceChangeCents !== 0,
+            'units_exceed_current_rule' => $isOutsideCurrentRule,
+            'current_billing_rule' => $currentRule ? [
+                'uuid' => $currentRule->uuid,
+                'range_start' => (int) $currentRule->range_start,
+                'range_end' => $currentRule->range_end !== null ? (int) $currentRule->range_end : null,
+                'price_cents' => (int) $currentRule->price_cents,
+            ] : null,
+            'projected_billing_rule' => [
+                'uuid' => $projectedRule->uuid,
+                'range_start' => (int) $projectedRule->range_start,
+                'range_end' => $projectedRule->range_end !== null ? (int) $projectedRule->range_end : null,
+                'price_cents' => $projectedMonthlyPriceCents,
+            ],
+            'message' => $priceChangeCents > 0
+                ? 'The next payment will increase because the property now falls into a higher unit range.'
+                : ($priceChangeCents < 0
+                    ? 'The next payment will reduce because the property now falls into a lower unit range.'
+                    : 'The next payment remains the same for the current unit range.'),
         ];
     }
 

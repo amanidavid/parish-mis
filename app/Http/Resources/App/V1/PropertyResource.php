@@ -63,6 +63,10 @@ class PropertyResource extends ApiJsonResource
                 $this->resource->offsetExists('contract_statuses'),
                 fn () => $this->contract_statuses ?? []
             ),
+            'access' => $this->when(
+                $this->resource->offsetExists('access'),
+                fn () => $this->access
+            ),
             ...$this->timestamps(),
         ];
     }

@@ -134,6 +134,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('workspace/subscription', [WorkspaceController::class, 'subscription']);
                 Route::post('workspace/subscription/billing-profile/preview', [WorkspaceController::class, 'previewBillingProfileChange']);
                 Route::get('workspace/subscription/properties', [WorkspaceController::class, 'subscriptionProperties']);
+                Route::get('workspace/subscription/properties/cost-breakdown', [WorkspaceController::class, 'propertyCostBreakdown']);
+                Route::get('workspace/subscription/properties/{propertyUuid}/cost-breakdown', [WorkspaceController::class, 'propertyCostBreakdownShow']);
+                Route::get('workspace/subscription/properties/{propertyUuid}/payments', [WorkspaceController::class, 'propertyCostBreakdownPayments']);
                 Route::prefix('access-control')->group(function () {
                     Route::get('permissions', [AccessControlController::class, 'permissions']);
                     Route::post('permissions', [AccessControlController::class, 'storePermission']);

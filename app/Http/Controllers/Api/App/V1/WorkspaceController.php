@@ -5,7 +5,11 @@ namespace App\Http\Controllers\Api\App\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\PreviewWorkspaceBillingProfileChangeRequest;
 use App\Http\Requests\Api\App\V1\StoreWorkspaceRequest;
+use App\Http\Requests\Api\App\V1\WorkspacePropertyCostBreakdownIndexRequest;
+use App\Http\Requests\Api\App\V1\WorkspacePropertySubscriptionPaymentIndexRequest;
 use App\Http\Requests\Api\App\V1\WorkspaceSubscriptionPropertyIndexRequest;
+use App\Http\Resources\App\V1\WorkspacePropertyCostBreakdownResource;
+use App\Http\Resources\App\V1\WorkspacePropertySubscriptionPaymentResource;
 use App\Http\Resources\App\V1\WorkspaceResource;
 use App\Http\Resources\App\V1\WorkspaceSubscriptionPropertyResource;
 use App\Http\Resources\App\V1\WorkspaceSubscriptionResource;
@@ -13,6 +17,7 @@ use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\PropertySubscriptionService;
 use App\Services\V1\SubscriptionBillingProfileChangeService;
 use App\Services\V1\SubscriptionService;
 use App\Services\V1\TenantProvisioningService;
@@ -29,6 +34,7 @@ class WorkspaceController extends Controller
      */
     public function __construct(
         private SubscriptionService $subscriptionService,
+        private PropertySubscriptionService $propertySubscriptionService,
         private SubscriptionBillingProfileChangeService $subscriptionBillingProfileChangeService,
         private TenantProvisioningService $tenantProvisioningService,
         private WorkspaceService $workspaceService,
@@ -202,6 +208,94 @@ class WorkspaceController extends Controller
         return ApiResponse::resource(
             WorkspaceSubscriptionPropertyResource::collection($properties),
             'Workspace subscription property breakdown retrieved successfully.'
+        );
+    }
+
+    /**
+     * Handle property cost breakdown request.
+     */
+    public function propertyCostBreakdown(WorkspacePropertyCostBreakdownIndexRequest $request)
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if (!$tenant instanceof Tenant) {
+            return ApiResponse::serverError(
+                ['workspace' => [ApiMessages::TENANT_CONTEXT_UNAVAILABLE]],
+                ApiMessages::TENANT_CONTEXT_UNAVAILABLE
+            );
+        }
+
+        $properties = $this->propertySubscriptionService->listTenantPropertySubscriptions(
+            $tenant,
+            $request->validated()
+        );
+
+        return ApiResponse::resource(
+            WorkspacePropertyCostBreakdownResource::collection($properties),
+            'Workspace property cost breakdown retrieved successfully.'
+        );
+    }
+
+    /**
+     * Handle property cost breakdown details request.
+     */
+    public function propertyCostBreakdownShow(string $propertyUuid)
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if (!$tenant instanceof Tenant) {
+            return ApiResponse::serverError(
+                ['workspace' => [ApiMessages::TENANT_CONTEXT_UNAVAILABLE]],
+                ApiMessages::TENANT_CONTEXT_UNAVAILABLE
+            );
+        }
+
+        $property = $this->propertySubscriptionService->getTenantPropertySubscription($tenant, $propertyUuid);
+
+        if (!$property) {
+            return ApiResponse::notFound(
+                ['property_uuid' => ['The selected property subscription could not be found for this workspace.']],
+                'Workspace property subscription could not be found.'
+            );
+        }
+
+        return ApiResponse::resource(
+            new WorkspacePropertyCostBreakdownResource($property),
+            'Workspace property cost breakdown details retrieved successfully.'
+        );
+    }
+
+    /**
+     * Handle property payment history request.
+     */
+    public function propertyCostBreakdownPayments(WorkspacePropertySubscriptionPaymentIndexRequest $request, string $propertyUuid)
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if (!$tenant instanceof Tenant) {
+            return ApiResponse::serverError(
+                ['workspace' => [ApiMessages::TENANT_CONTEXT_UNAVAILABLE]],
+                ApiMessages::TENANT_CONTEXT_UNAVAILABLE
+            );
+        }
+
+        $property = $this->propertySubscriptionService->getTenantPropertySubscription($tenant, $propertyUuid);
+
+        if (!$property) {
+            return ApiResponse::notFound(
+                ['property_uuid' => ['The selected property subscription could not be found for this workspace.']],
+                'Workspace property subscription could not be found.'
+            );
+        }
+
+        $payments = $this->propertySubscriptionService->listPayments($tenant, [
+            ...$request->validated(),
+            'property_uuid' => $propertyUuid,
+        ]);
+
+        return ApiResponse::resource(
+            WorkspacePropertySubscriptionPaymentResource::collection($payments),
+            'Workspace property payment history retrieved successfully.'
         );
     }
 
