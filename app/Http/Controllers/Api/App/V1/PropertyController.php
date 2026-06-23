@@ -131,7 +131,7 @@ class PropertyController extends Controller
     public function store(StorePropertyRequest $request)
     {
         $this->authorize('create', Property::class);
-        $this->prepareInventoryMutation(true);
+        $this->preparePropertyScopedWorkspaceMutation(true);
 
         $data = $request->validated();
         $type = null;
@@ -305,12 +305,27 @@ class PropertyController extends Controller
     /**
      * Prepare inventory mutation.
      */
-    private function prepareInventoryMutation(bool $captureUsageBaseline = false): void
+    private function prepareInventoryMutation(bool $captureUsageBaseline = false, array $messageOverrides = []): void
     {
         $tenant = request()->attributes->get('tenant');
 
         if ($tenant instanceof Tenant) {
-            $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
+            $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant, $messageOverrides);
+            if ($captureUsageBaseline) {
+                $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
+            }
+        }
+    }
+
+    /**
+     * Prepare property-scoped workspace mutation.
+     */
+    private function preparePropertyScopedWorkspaceMutation(bool $captureUsageBaseline = false): void
+    {
+        $tenant = request()->attributes->get('tenant');
+
+        if ($tenant instanceof Tenant) {
+            $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
             if ($captureUsageBaseline) {
                 $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
             }
