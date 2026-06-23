@@ -383,6 +383,53 @@ class SubscriptionService
     }
 
     /**
+     * Assert workspace allows property-scoped operational mutation.
+     */
+    public function assertWorkspaceAllowsPropertyScopedMutation(Tenant $tenant): void
+    {
+        $subscriptionState = $this->resolveSubscriptionState($this->currentSubscription($tenant));
+
+        if ($tenant->status === 'suspended') {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'This workspace is currently suspended.',
+                    'data' => null,
+                    'errors' => [
+                        'workspace' => ['This workspace is currently suspended.'],
+                    ],
+                ], 422)
+            );
+        }
+
+        if ($tenant->provisioning_status !== 'ready') {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'This workspace is still being prepared.',
+                    'data' => null,
+                    'errors' => [
+                        'workspace' => ['This workspace is still being prepared.'],
+                    ],
+                ], 422)
+            );
+        }
+
+        if (($subscriptionState['status'] ?? null) === 'unconfigured') {
+            throw new HttpResponseException(
+                response()->json([
+                    'success' => false,
+                    'message' => 'Workspace billing is not configured yet.',
+                    'data' => null,
+                    'errors' => [
+                        'workspace' => ['Workspace billing is not configured yet.'],
+                    ],
+                ], 422)
+            );
+        }
+    }
+
+    /**
      * Resolve onboarding plan.
      */
     private function resolveOnboardingPlan(?string $planUuid = null): Plan

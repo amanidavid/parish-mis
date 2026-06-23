@@ -308,7 +308,7 @@ class MaintenanceExpenseController extends Controller
         $tenant = request()->attributes->get('tenant');
 
         if ($tenant instanceof Tenant) {
-            $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant);
+            $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
         }
     }
 
