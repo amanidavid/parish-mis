@@ -190,7 +190,7 @@ class PropertyController extends Controller
     public function update(UpdatePropertyRequest $request, Property $property)
     {
         $this->authorize('update', $property);
-        $this->prepareInventoryMutation();
+        $this->preparePropertyScopedWorkspaceMutation();
 
         $data = $request->validated();
         $typeId = $property->type_id;
@@ -278,7 +278,7 @@ class PropertyController extends Controller
     public function destroy(Property $property)
     {
         $this->authorize('delete', $property);
-        $this->prepareInventoryMutation(true);
+        $this->preparePropertyScopedWorkspaceMutation(true);
         $this->syncWorkspacePropertyRegistry([(int) $property->id]);
 
         DB::transaction(fn () => $property->delete());
@@ -299,21 +299,6 @@ class PropertyController extends Controller
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->syncWorkspaceUsage($tenant);
             $this->subscriptionUsageAdjustmentService->syncPendingAdjustment($tenant);
-        }
-    }
-
-    /**
-     * Prepare inventory mutation.
-     */
-    private function prepareInventoryMutation(bool $captureUsageBaseline = false, array $messageOverrides = []): void
-    {
-        $tenant = request()->attributes->get('tenant');
-
-        if ($tenant instanceof Tenant) {
-            $this->subscriptionService->assertWorkspaceAllowsInventoryMutation($tenant, $messageOverrides);
-            if ($captureUsageBaseline) {
-                $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
-            }
         }
     }
 
