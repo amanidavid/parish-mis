@@ -196,6 +196,14 @@ class TenantController extends Controller
             return ApiResponse::error('Tenant provisioning already in progress', ['tenant' => ['This tenant is currently being provisioned.']], 422);
         }
 
+        if ($tenant->provisioning_status === 'ready') {
+            return ApiResponse::error(
+                'Tenant provisioning retry is not allowed',
+                ['tenant' => ['This workspace is already provisioned and ready. Retry is only available for failed or pending provisioning states.']],
+                422
+            );
+        }
+
         $ownerId = UserTenant::query()
             ->where('tenant_id', $tenant->id)
             ->where('is_owner', true)
