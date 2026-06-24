@@ -3,6 +3,7 @@
 namespace App\Http\Resources\App\V1;
 
 use App\Http\Resources\ApiJsonResource;
+use App\Models\Tenant\Unit;
 use Illuminate\Http\Request;
 
 class UnitResource extends ApiJsonResource
@@ -14,6 +15,7 @@ class UnitResource extends ApiJsonResource
             'unit_number' => $this->unit_number,
             'description' => $this->description,
             'status' => $this->status,
+            'manual_status_options' => Unit::MANUAL_STATUSES,
             'property_floor' => $this->whenLoaded('propertyFloor', fn () => [
                 'uuid' => $this->propertyFloor->uuid,
                 'name' => $this->propertyFloor->name,
