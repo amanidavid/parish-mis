@@ -301,14 +301,15 @@ class ContractReportService
     }
 
     /**
-     * Build the year-based monthly bar chart for active contract amounts using contract start month buckets.
+     * Build the rolling last-12-month bar chart for active contract amounts using contract start month buckets.
      */
     public function monthlyActiveAmountChart(User $tenantUser, array $filters = []): array
     {
         $scope = $this->resolveScope($tenantUser);
-        $year = (int) ($filters['year'] ?? now()->year);
-        $startDate = Carbon::create($year, 1, 1)->toDateString();
-        $endDate = Carbon::create($year, 12, 31)->toDateString();
+        $windowEnd = now()->startOfMonth();
+        $windowStart = $windowEnd->copy()->subMonths(11);
+        $startDate = $windowStart->toDateString();
+        $endDate = $windowEnd->copy()->endOfMonth()->toDateString();
 
         $query = $this->tenantTable('customer_contracts')
             ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
@@ -331,17 +332,17 @@ class ContractReportService
             ->get()
             ->keyBy('bucket_key');
 
-        $series = collect(range(1, 12))
-            ->map(function (int $month) use ($year, $rows): array {
-                $bucketStart = Carbon::create($year, $month, 1);
+        $series = collect(range(0, 11))
+            ->map(function (int $offset) use ($windowStart, $rows): array {
+                $bucketStart = $windowStart->copy()->addMonths($offset);
                 $bucketKey = $bucketStart->toDateString();
                 $row = $rows->get($bucketKey);
 
                 return [
                     'bucket_key' => $bucketKey,
-                    'bucket_label' => $bucketStart->format('F'),
-                    'month' => $month,
-                    'year' => $year,
+                    'bucket_label' => $bucketStart->format('M Y'),
+                    'month' => (int) $bucketStart->format('n'),
+                    'year' => (int) $bucketStart->format('Y'),
                     'active_contracts_count' => (int) ($row->active_contracts_count ?? 0),
                     'active_contract_amount' => (float) ($row->active_contract_amount ?? 0),
                 ];
@@ -352,9 +353,11 @@ class ContractReportService
         return [
             'filters' => [
                 'property_uuid' => $filters['property_uuid'] ?? null,
-                'year' => $year,
                 'start_date' => $startDate,
                 'end_date' => $endDate,
+                'window' => 'last_12_months',
+                'window_start_month' => $windowStart->toDateString(),
+                'window_end_month' => $windowEnd->toDateString(),
                 'reporting_rule' => 'start_date_based',
                 'metric' => 'active_contract_amount',
             ],
