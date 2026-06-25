@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\DB;
 class ContractReportService
 {
     private const MAX_PER_PAGE = 100;
+    private const STATUS_ACTIVE = 'active';
+    private const STATUS_DRAFT = 'draft';
+    private const STATUS_EXPIRED = 'expired';
+    private const STATUS_TERMINATED = 'terminated';
 
     /**
      * Create a new instance.
@@ -48,11 +52,11 @@ class ContractReportService
         $totals = [
             'contracts_count' => (int) $statusRows->sum(fn ($row) => (int) $row->contracts_count),
             'total_contract_amount' => (float) $statusRows->sum(fn ($row) => (float) $row->total_contract_amount),
-            'active_contracts_count' => (int) optional($statusRows->firstWhere('status', 'active'))->contracts_count,
-            'active_contract_amount' => (float) optional($statusRows->firstWhere('status', 'active'))->total_contract_amount,
-            'draft_contracts_count' => (int) optional($statusRows->firstWhere('status', 'draft'))->contracts_count,
-            'expired_contracts_count' => (int) optional($statusRows->firstWhere('status', 'expired'))->contracts_count,
-            'terminated_contracts_count' => (int) optional($statusRows->firstWhere('status', 'terminated'))->contracts_count,
+            'active_contracts_count' => $this->statusRowCount($statusRows, self::STATUS_ACTIVE),
+            'active_contract_amount' => $this->statusRowAmount($statusRows, self::STATUS_ACTIVE),
+            'draft_contracts_count' => $this->statusRowCount($statusRows, self::STATUS_DRAFT),
+            'expired_contracts_count' => $this->statusRowCount($statusRows, self::STATUS_EXPIRED),
+            'terminated_contracts_count' => $this->statusRowCount($statusRows, self::STATUS_TERMINATED),
         ];
 
         return [
@@ -60,7 +64,6 @@ class ContractReportService
                 'property_uuid' => $filters['property_uuid'] ?? null,
                 'customer_uuid' => $filters['customer_uuid'] ?? null,
                 'status' => $filters['status'] ?? null,
-                'billing_cycle' => $filters['billing_cycle'] ?? null,
                 'start_date' => $filters['start_date'] ?? null,
                 'end_date' => $filters['end_date'] ?? null,
             ],
@@ -117,7 +120,6 @@ class ContractReportService
                 'customer_contracts.uuid as contract_uuid',
                 'customer_contracts.contract_number',
                 'customer_contracts.status',
-                'customer_contracts.billing_cycle',
                 'customer_contracts.amount',
                 'customer_contracts.currency',
                 'customer_contracts.start_date',
@@ -191,10 +193,6 @@ class ContractReportService
 
         $query = $this->applyPropertyScopeToColumn($query, $scope, 'property_floors.property_id');
 
-        if (!empty($filters['billing_cycle'] ?? null)) {
-            $query->where('customer_contracts.billing_cycle', $filters['billing_cycle']);
-        }
-
         [$bucketSql, $bucketLabelSql] = $this->chartBucketExpressions($period);
         $recognizedStatuses = ['active'];
 
@@ -233,7 +231,6 @@ class ContractReportService
         return [
             'filters' => [
                 'property_uuid' => $filters['property_uuid'],
-                'billing_cycle' => $filters['billing_cycle'] ?? null,
                 'range' => $range,
                 'period' => $period,
                 'start_date' => $startDate,
@@ -280,10 +277,6 @@ class ContractReportService
             $query->where('customer_contracts.status', $filters['status']);
         }
 
-        if (!empty($filters['billing_cycle'] ?? null)) {
-            $query->where('customer_contracts.billing_cycle', $filters['billing_cycle']);
-        }
-
         if (
             $applyContractWindow
             && (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null))
@@ -300,6 +293,22 @@ class ContractReportService
         }
 
         return $query;
+    }
+
+    /**
+     * Resolve count for one status row without repeating firstWhere casting at each callsite.
+     */
+    private function statusRowCount(\Illuminate\Support\Collection $statusRows, string $status): int
+    {
+        return (int) optional($statusRows->firstWhere('status', $status))->contracts_count;
+    }
+
+    /**
+     * Resolve amount for one status row without repeating firstWhere casting at each callsite.
+     */
+    private function statusRowAmount(\Illuminate\Support\Collection $statusRows, string $status): float
+    {
+        return (float) optional($statusRows->firstWhere('status', $status))->total_contract_amount;
     }
 
     /**

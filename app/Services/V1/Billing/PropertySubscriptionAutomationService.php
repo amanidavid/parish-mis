@@ -13,6 +13,8 @@ use InvalidArgumentException;
 
 class PropertySubscriptionAutomationService
 {
+    private ?array $defaultTaskDefinitions = null;
+
     /**
      * Create a new instance.
      */
@@ -83,7 +85,8 @@ class PropertySubscriptionAutomationService
      */
     public function runNow(AutomationTaskSetting $taskSetting): AutomationTaskRun
     {
-        return $this->runTask($taskSetting, true);
+        return $this->runTask($taskSetting, true, true)
+            ?? throw new InvalidArgumentException('The requested automation task could not be started.');
     }
 
     /**
@@ -91,6 +94,8 @@ class PropertySubscriptionAutomationService
      */
     public function runTaskByKey(string $taskKey, bool $force = false): ?AutomationTaskRun
     {
+        $this->ensureDefaultTasks();
+
         $taskSetting = AutomationTaskSetting::query()
             ->where('task_key', $taskKey)
             ->first();
@@ -118,10 +123,11 @@ class PropertySubscriptionAutomationService
                     ->orWhere('next_run_at', '<=', now());
             })
             ->orderBy('next_run_at')
-            ->get()
-            ->each(function (AutomationTaskSetting $taskSetting) use (&$executed) {
-                $this->runTask($taskSetting, false);
-                $executed++;
+            ->pluck('id')
+            ->each(function (int $taskId) use (&$executed) {
+                if ($this->runTaskById($taskId, false, false) !== null) {
+                    $executed++;
+                }
             });
 
         return $executed;
@@ -130,23 +136,25 @@ class PropertySubscriptionAutomationService
     /**
      * Run task.
      */
-    private function runTask(AutomationTaskSetting $taskSetting, bool $force): AutomationTaskRun
+    private function runTask(AutomationTaskSetting $taskSetting, bool $force, bool $recordSkipped = true): ?AutomationTaskRun
     {
-        $this->ensureSupportedTask($taskSetting);
         $startedAt = now();
+        [$lockedTask, $skipStatus, $skipMessage] = $this->claimTaskRun((int) $taskSetting->id, $force, $startedAt);
+
+        if (!$lockedTask) {
+            if (!$recordSkipped || !$skipStatus || !$skipMessage) {
+                return null;
+            }
+
+            return $this->storeRunResult($taskSetting, $startedAt, 0, $skipStatus, $skipMessage);
+        }
+
         $rowsAffected = 0;
         $status = AutomationTaskRun::STATUS_SUCCESS;
         $message = 'Automation task completed successfully.';
 
         try {
-            if (!$force && !$taskSetting->enabled) {
-                $status = AutomationTaskRun::STATUS_SKIPPED;
-                $message = 'Automation task is disabled.';
-            } elseif (!$force && !$this->isDue($taskSetting, $startedAt)) {
-                $status = AutomationTaskRun::STATUS_SKIPPED;
-                $message = 'Automation task is not due yet.';
-            } else {
-                $rowsAffected = match ($taskSetting->task_key) {
+            $rowsAffected = match ($lockedTask->task_key) {
                     AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $this->propertySubscriptionService->syncExpiredPropertySubscriptions(),
                     AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $this->customerContractAutomationService->syncReadyTenants(),
                     AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => $this->contractAlertService->syncReadyTenants(),
@@ -154,47 +162,14 @@ class PropertySubscriptionAutomationService
                     default => throw new InvalidArgumentException('Unsupported automation task.'),
                 };
 
-                $message = $this->successMessageForTask($taskSetting->task_key, $rowsAffected);
-            }
+            $message = $this->successMessageForTask($lockedTask->task_key, $rowsAffected);
         } catch (\Throwable $exception) {
             report($exception);
             $status = AutomationTaskRun::STATUS_FAILED;
-            $message = $this->failureMessageForTask($taskSetting->task_key);
+            $message = $this->failureMessageForTask($lockedTask->task_key);
         }
 
-        return DB::connection('base')->transaction(function () use ($taskSetting, $startedAt, $rowsAffected, $status, $message) {
-            $lockedTask = AutomationTaskSetting::query()
-                ->whereKey($taskSetting->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-
-            $finishedAt = now();
-            $run = AutomationTaskRun::query()->create([
-                'automation_task_setting_id' => $lockedTask->id,
-                'status' => $status,
-                'started_at' => $startedAt,
-                'finished_at' => $finishedAt,
-                'rows_affected' => $rowsAffected,
-                'message' => $message,
-            ]);
-
-            $lockedTask->fill([
-                'last_run_at' => $finishedAt,
-                'last_status' => $status,
-                'last_message' => $message,
-                'next_run_at' => $lockedTask->enabled
-                    ? $this->computeNextRunAt(
-                        $lockedTask->schedule_mode,
-                        $lockedTask->interval_minutes,
-                        $lockedTask->run_at_time,
-                        $lockedTask->timezone,
-                        $finishedAt
-                    )
-                    : null,
-            ])->save();
-
-            return $run;
-        });
+        return $this->storeRunResult($lockedTask, $startedAt, $rowsAffected, $status, $message);
     }
 
     /**
@@ -202,11 +177,17 @@ class PropertySubscriptionAutomationService
      */
     private function ensureDefaultTasks(): void
     {
-        foreach ($this->defaultTasks() as $taskKey => $taskDefinition) {
-            AutomationTaskSetting::query()->firstOrCreate(
-                ['task_key' => $taskKey],
-                $taskDefinition
-            );
+        $taskDefinitions = $this->defaultTasks();
+        $existingTaskKeys = AutomationTaskSetting::query()
+            ->whereIn('task_key', array_keys($taskDefinitions))
+            ->pluck('task_key')
+            ->all();
+
+        foreach (array_diff(array_keys($taskDefinitions), $existingTaskKeys) as $taskKey) {
+            AutomationTaskSetting::query()->create([
+                'task_key' => $taskKey,
+                ...$taskDefinitions[$taskKey],
+            ]);
         }
     }
 
@@ -225,7 +206,13 @@ class PropertySubscriptionAutomationService
      */
     private function defaultTasks(): array
     {
-        return [
+        if ($this->defaultTaskDefinitions !== null) {
+            return $this->defaultTaskDefinitions;
+        }
+
+        $defaultNextRunAt = now()->addMinutes(15);
+
+        return $this->defaultTaskDefinitions = [
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => [
                 'name' => 'Customer Contract Expiry Sync',
                 'description' => 'Automatically expires ended customer contracts and refreshes unit occupancy across ready workspaces.',
@@ -233,7 +220,7 @@ class PropertySubscriptionAutomationService
                 'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
                 'interval_minutes' => 15,
                 'timezone' => 'Africa/Nairobi',
-                'next_run_at' => now()->addMinutes(15),
+                'next_run_at' => $defaultNextRunAt->copy(),
                 'meta' => ['supports_run_now' => true],
             ],
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => [
@@ -243,7 +230,7 @@ class PropertySubscriptionAutomationService
                 'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
                 'interval_minutes' => 15,
                 'timezone' => 'Africa/Nairobi',
-                'next_run_at' => now()->addMinutes(15),
+                'next_run_at' => $defaultNextRunAt->copy(),
                 'meta' => ['supports_run_now' => true],
             ],
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => [
@@ -253,7 +240,7 @@ class PropertySubscriptionAutomationService
                 'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
                 'interval_minutes' => 15,
                 'timezone' => 'Africa/Nairobi',
-                'next_run_at' => now()->addMinutes(15),
+                'next_run_at' => $defaultNextRunAt->copy(),
                 'meta' => ['supports_run_now' => true],
             ],
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_ALERTS => [
@@ -263,7 +250,7 @@ class PropertySubscriptionAutomationService
                 'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
                 'interval_minutes' => 15,
                 'timezone' => 'Africa/Nairobi',
-                'next_run_at' => now()->addMinutes(15),
+                'next_run_at' => $defaultNextRunAt->copy(),
                 'meta' => ['supports_run_now' => true],
             ],
         ];
@@ -276,8 +263,8 @@ class PropertySubscriptionAutomationService
     {
         return match ($taskKey) {
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $rowsAffected > 0
-                ? sprintf('Automation task completed successfully. %d customer contract and unit rows were updated.', $rowsAffected)
-                : 'Automation task completed successfully. No customer contract or unit rows required updating.',
+                ? sprintf('Automation task completed successfully. %d customer contract, unit, and customer status rows were updated.', $rowsAffected)
+                : 'Automation task completed successfully. No customer contract, unit, or customer status rows required updating.',
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $rowsAffected > 0
                 ? sprintf('Automation task completed successfully. %d property subscription rows were updated.', $rowsAffected)
                 : 'Automation task completed successfully. No property subscription rows required updating.',
@@ -315,6 +302,100 @@ class PropertySubscriptionAutomationService
         }
 
         return $taskSetting->next_run_at === null || Carbon::parse($taskSetting->next_run_at)->lte($now);
+    }
+
+    /**
+     * Run task by id.
+     */
+    private function runTaskById(int $taskId, bool $force, bool $recordSkipped): ?AutomationTaskRun
+    {
+        $taskSetting = AutomationTaskSetting::query()->find($taskId);
+
+        if (!$taskSetting) {
+            return null;
+        }
+
+        return $this->runTask($taskSetting, $force, $recordSkipped);
+    }
+
+    /**
+     * Claim task run.
+     *
+     * @return array{0: ?AutomationTaskSetting, 1: ?string, 2: ?string}
+     */
+    private function claimTaskRun(int $taskId, bool $force, Carbon $startedAt): array
+    {
+        return DB::connection('base')->transaction(function () use ($taskId, $force, $startedAt) {
+            $lockedTask = AutomationTaskSetting::query()
+                ->whereKey($taskId)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$lockedTask) {
+                return [null, null, null];
+            }
+
+            $this->ensureSupportedTask($lockedTask);
+
+            if (!$force && !$lockedTask->enabled) {
+                return [null, AutomationTaskRun::STATUS_SKIPPED, 'Automation task is disabled.'];
+            }
+
+            if (!$force && !$this->isDue($lockedTask, $startedAt)) {
+                return [null, AutomationTaskRun::STATUS_SKIPPED, 'Automation task is not due yet.'];
+            }
+
+            $lockedTask->forceFill([
+                'next_run_at' => $lockedTask->enabled
+                    ? $this->computeNextRunAt(
+                        $lockedTask->schedule_mode,
+                        $lockedTask->interval_minutes,
+                        $lockedTask->run_at_time,
+                        $lockedTask->timezone,
+                        $startedAt
+                    )
+                    : null,
+            ])->save();
+
+            return [$lockedTask->fresh(), null, null];
+        });
+    }
+
+    /**
+     * Store run result.
+     */
+    private function storeRunResult(
+        AutomationTaskSetting $taskSetting,
+        Carbon $startedAt,
+        int $rowsAffected,
+        string $status,
+        string $message
+    ): AutomationTaskRun {
+        return DB::connection('base')->transaction(function () use ($taskSetting, $startedAt, $rowsAffected, $status, $message) {
+            $lockedTask = AutomationTaskSetting::query()
+                ->whereKey($taskSetting->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $finishedAt = now();
+            $run = AutomationTaskRun::query()->create([
+                'automation_task_setting_id' => $lockedTask->id,
+                'status' => $status,
+                'started_at' => $startedAt,
+                'finished_at' => $finishedAt,
+                'rows_affected' => $rowsAffected,
+                'message' => $message,
+            ]);
+
+            $lockedTask->fill([
+                'last_run_at' => $finishedAt,
+                'last_status' => $status,
+                'last_message' => $message,
+                'next_run_at' => $lockedTask->enabled ? $lockedTask->next_run_at : null,
+            ])->save();
+
+            return $run;
+        });
     }
 
     /**

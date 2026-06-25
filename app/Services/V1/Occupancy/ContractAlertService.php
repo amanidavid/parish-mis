@@ -149,9 +149,10 @@ class ContractAlertService
     private function processContracts($query, string $eventType): int
     {
         $sentAlerts = 0;
+        $timestamp = now();
 
         $query->orderBy('customer_contracts.id')
-            ->chunkById(100, function ($contracts) use (&$sentAlerts, $eventType) {
+            ->chunkById(100, function ($contracts) use (&$sentAlerts, $eventType, $timestamp) {
                 $propertyIds = $contracts->pluck('property_id')->map(fn ($id) => (int) $id)->unique()->values()->all();
                 $contractIds = $contracts->pluck('contract_id')->map(fn ($id) => (int) $id)->values()->all();
                 $staffRecipients = config('contract_alerts.recipients.staff', true)
@@ -160,6 +161,7 @@ class ContractAlertService
                 $existingLogs = $this->existingLogs($contractIds, $eventType);
 
                 foreach ($contracts as $contract) {
+                    [$subject, $message] = $this->buildMessage($contract, $eventType);
                     $contractRecipients = $this->resolveRecipientsForContract(
                         $contract,
                         $staffRecipients[(int) $contract->property_id] ?? []
@@ -187,7 +189,6 @@ class ContractAlertService
                                 continue;
                             }
 
-                            [$subject, $message] = $this->buildMessage($contract, $eventType);
                             $status = 'success';
                             $error = null;
 
@@ -199,8 +200,12 @@ class ContractAlertService
                                 $error = $exception->getMessage();
                             }
 
-                            $this->upsertLog($contract, $recipient, $channel, $eventType, $address, $status, $error);
-                            $existingLogs[$logKey] = ['status' => $status];
+                            $existingUuid = $existingLogs[$logKey]['uuid'] ?? null;
+                            $this->upsertLog($contract, $recipient, $channel, $eventType, $address, $status, $error, $timestamp, $existingUuid);
+                            $existingLogs[$logKey] = [
+                                'status' => $status,
+                                'uuid' => $existingUuid ?? $existingLogs[$logKey]['uuid'] ?? null,
+                            ];
                         }
                     }
                 }
@@ -272,7 +277,7 @@ class ContractAlertService
 
         return $this->baseContractQuery()
             ->whereIn('customer_contracts.status', CustomerContractRuleService::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-            ->whereDate('customer_contracts.end_date', '=', $targetDate);
+            ->where('customer_contracts.end_date', '=', $targetDate);
     }
 
     /**
@@ -284,7 +289,7 @@ class ContractAlertService
 
         return $this->baseContractQuery()
             ->where('customer_contracts.status', 'expired')
-            ->whereDate('customer_contracts.end_date', '=', $today);
+            ->where('customer_contracts.end_date', '=', $today);
     }
 
     /**
@@ -403,6 +408,7 @@ class ContractAlertService
                 $log->channel,
                 $log->recipient_key
             )] = [
+                'uuid' => $log->uuid,
                 'status' => $log->status,
             ];
         }
@@ -420,16 +426,10 @@ class ContractAlertService
         string $eventType,
         string $address,
         string $status,
-        ?string $error
+        ?string $error,
+        Carbon $timestamp,
+        ?string $existingUuid = null
     ): void {
-        $existingUuid = $this->tenantDb()->table('contract_alert_logs')
-            ->where('contract_id', $contract->contract_id)
-            ->where('event_type', $eventType)
-            ->where('channel', $channel)
-            ->where('recipient_key', $recipient['recipient_key'])
-            ->whereDate('contract_end_date', $contract->end_date)
-            ->value('uuid');
-
         $this->tenantDb()->table('contract_alert_logs')->updateOrInsert(
             [
                 'contract_id' => $contract->contract_id,
@@ -448,9 +448,8 @@ class ContractAlertService
                 'recipient_address' => $address,
                 'status' => $status,
                 'message' => $error,
-                'sent_at' => now(),
-                'updated_at' => now(),
-                'created_at' => now(),
+                'sent_at' => $timestamp,
+                'updated_at' => $timestamp,
             ]
         );
     }

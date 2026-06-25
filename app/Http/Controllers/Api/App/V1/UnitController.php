@@ -290,7 +290,7 @@ class UnitController extends Controller
                 $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, $moduleName);
             } catch (InvalidArgumentException $exception) {
                 return ApiResponse::error(
-                    'Property subscription access is required.',
+                    'This property is not paid for right now. Renew or activate the property subscription to continue.',
                     ['property_subscription' => [$exception->getMessage()]],
                     422
                 );

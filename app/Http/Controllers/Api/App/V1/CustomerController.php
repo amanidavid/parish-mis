@@ -129,7 +129,7 @@ class CustomerController extends Controller
                 'display_name' => $this->normalizeDisplayName($data['display_name']) ?? '',
                 'email' => $this->normalizeEmail($data['email'] ?? null),
                 'phone' => $this->normalizePhone($data['phone'] ?? null),
-                'status' => $data['status'] ?? 'active',
+                'status' => Customer::STATUS_INACTIVE,
                 'notes' => $data['notes'] ?? null,
             ]);
 
@@ -214,7 +214,6 @@ class CustomerController extends Controller
                 'display_name' => isset($data['display_name']) ? ($this->normalizeDisplayName($data['display_name']) ?? $customer->display_name) : $customer->display_name,
                 'email' => array_key_exists('email', $data) ? $this->normalizeEmail($data['email']) : $customer->email,
                 'phone' => array_key_exists('phone', $data) ? $this->normalizePhone($data['phone']) : $customer->phone,
-                'status' => $data['status'] ?? $customer->status,
                 'notes' => array_key_exists('notes', $data) ? $data['notes'] : $customer->notes,
             ])->save();
 
@@ -287,7 +286,7 @@ class CustomerController extends Controller
                 $this->propertySubscriptionAccessService->assertPropertyAllowsOperationalMutation($tenant, $property, 'customers');
             } catch (InvalidArgumentException $exception) {
                 return ApiResponse::error(
-                    'Property subscription access is required.',
+                    'This property is not paid for right now. Renew or activate the property subscription to continue.',
                     ['property_subscription' => [$exception->getMessage()]],
                     422
                 );

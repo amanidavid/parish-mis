@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 class TenantAdminInsightService
 {
     private const MAX_PER_PAGE = 100;
+    private const STATUS_ACTIVE = 'active';
 
     /**
      * Handle operational summary.
@@ -257,7 +258,7 @@ class TenantAdminInsightService
 
         $this->applyPropertyLocationBreakdownSort($query, $config['name_column'], $filters['sort'] ?? null);
 
-        $perPage = min((int) ($filters['per_page'] ?? 15), self::MAX_PER_PAGE);
+        $perPage = min(max((int) ($filters['per_page'] ?? 15), 1), self::MAX_PER_PAGE);
         $rows = $query->paginate($perPage)->withQueryString();
 
         return [
@@ -355,7 +356,7 @@ class TenantAdminInsightService
 
         $this->applyPropertyOverviewSort($query, $filters['sort'] ?? null);
 
-        $perPage = min((int) ($filters['per_page'] ?? 15), self::MAX_PER_PAGE);
+        $perPage = min(max((int) ($filters['per_page'] ?? 15), 1), self::MAX_PER_PAGE);
 
         return $query->paginate($perPage)->withQueryString();
     }
@@ -384,10 +385,6 @@ class TenantAdminInsightService
 
         if (!empty($filters['status'] ?? null)) {
             $query->where('customer_contracts.status', $filters['status']);
-        }
-
-        if (!empty($filters['billing_cycle'] ?? null)) {
-            $query->where('customer_contracts.billing_cycle', $filters['billing_cycle']);
         }
 
         if (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null)) {
@@ -427,12 +424,15 @@ class TenantAdminInsightService
             ->values()
             ->all();
 
+        $today = Carbon::today()->toDateString();
+        $expiringSoonDate = Carbon::today()->addDays((int) ($filters['expiring_days'] ?? 30))->toDateString();
+
         $expiringSoonCount = (clone $query)
-            ->where('customer_contracts.status', 'active')
+            ->where('customer_contracts.status', self::STATUS_ACTIVE)
             ->whereNotNull('customer_contracts.end_date')
             ->whereBetween('customer_contracts.end_date', [
-                Carbon::today()->toDateString(),
-                Carbon::today()->addDays((int) ($filters['expiring_days'] ?? 30))->toDateString(),
+                $today,
+                $expiringSoonDate,
             ])
             ->count('customer_contracts.id');
 
@@ -444,7 +444,6 @@ class TenantAdminInsightService
                 'district_uuid' => $filters['district_uuid'] ?? null,
                 'ward_uuid' => $filters['ward_uuid'] ?? null,
                 'status' => $filters['status'] ?? null,
-                'billing_cycle' => $filters['billing_cycle'] ?? null,
                 'start_date' => $filters['start_date'] ?? null,
                 'end_date' => $filters['end_date'] ?? null,
                 'expiring_days' => (int) ($filters['expiring_days'] ?? 30),

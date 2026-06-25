@@ -83,22 +83,29 @@ class PropertySubscriptionService
      */
     public function getTenantPropertySubscription(Tenant $tenant, string $propertyUuid): ?WorkspaceProperty
     {
-        $workspaceProperty = $this->workspacePropertyRegistryService->resolveWorkspaceProperty($tenant, $propertyUuid);
+        $workspaceProperty = WorkspaceProperty::query()
+            ->with([
+                'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
+                'subscription.latestPayment',
+                'latestPayment',
+                'payments' => fn ($builder) => $builder
+                    ->with($this->paymentRelations())
+                    ->orderByDesc('payment_date')
+                    ->orderByDesc('created_at')
+                    ->limit(10),
+            ])
+            ->withCount('payments')
+            ->withSum('payments as total_paid_amount_cents', 'total_amount_cents')
+            ->where('tenant_id', $tenant->id)
+            ->where('property_uuid', $propertyUuid)
+            ->first();
 
         if (!$workspaceProperty || $workspaceProperty->tenant_id !== $tenant->id) {
             return null;
         }
 
-        $workspaceProperty->load([
-            'payments' => fn ($builder) => $builder
-                ->with($this->paymentRelations())
-                ->orderByDesc('payment_date')
-                ->orderByDesc('created_at')
-                ->limit(10),
-        ]);
-        $workspaceProperty->setAttribute('payments_count', $workspaceProperty->payments()->count());
-        $workspaceProperty->setAttribute('total_paid_amount_cents', (int) $workspaceProperty->payments()->sum('total_amount_cents'));
-        $workspaceProperty->setRelation('activePayment', $this->resolveActivePayment($workspaceProperty));
+        $workspaceProperty->setAttribute('total_paid_amount_cents', (int) ($workspaceProperty->total_paid_amount_cents ?? 0));
+        $workspaceProperty->setRelation('activePayment', $this->resolveActivePaymentFromLoadedPayments($workspaceProperty));
         $workspaceProperty->setAttribute(
             'next_billing_preview',
             $this->buildNextBillingPreview($tenant, $workspaceProperty)
@@ -187,7 +194,7 @@ class PropertySubscriptionService
                 ->firstOrFail();
 
             if ($lockedProperty->property_deleted_at) {
-                throw new InvalidArgumentException('Payments cannot be recorded for a deleted property.');
+                throw new InvalidArgumentException('Payment cannot be recorded because this property has been deleted.');
             }
 
             /** @var PropertySubscription $subscription */
@@ -254,29 +261,32 @@ class PropertySubscriptionService
     {
         $query = PropertySubscriptionPayment::query()
             ->with($this->paymentRelations())
-            ->where('tenant_id', $tenant->id);
+            ->join('workspace_properties as payment_workspace_properties', 'payment_workspace_properties.id', '=', 'property_subscription_payments.workspace_property_id')
+            ->leftJoin('billing_rules as payment_billing_rules', 'payment_billing_rules.id', '=', 'property_subscription_payments.billing_rule_id')
+            ->select('property_subscription_payments.*')
+            ->where('property_subscription_payments.tenant_id', $tenant->id);
 
         if (!empty($filters['property_uuid'] ?? null)) {
             $propertyUuid = (string) $filters['property_uuid'];
-            $query->whereHas('workspaceProperty', fn (EloquentBuilder $builder) => $builder->where('property_uuid', $propertyUuid));
+            $query->where('payment_workspace_properties.property_uuid', $propertyUuid);
         }
 
         if (!empty($filters['billing_rule_uuid'] ?? null)) {
             $billingRuleUuid = (string) $filters['billing_rule_uuid'];
-            $query->whereHas('billingRule', fn (EloquentBuilder $builder) => $builder->where('uuid', $billingRuleUuid));
+            $query->where('payment_billing_rules.uuid', $billingRuleUuid);
         }
 
         if (!empty($filters['search'] ?? null)) {
             $search = trim((string) $filters['search']);
-            $query->whereHas('workspaceProperty', fn (EloquentBuilder $builder) => $this->applyPrefixSearch($builder, 'property_name', $search));
+            $this->applyPrefixSearch($query, 'payment_workspace_properties.property_name', $search);
         }
 
         if (!empty($filters['start_date'] ?? null)) {
-            $query->where('payment_date', '>=', $filters['start_date']);
+            $query->where('property_subscription_payments.payment_date', '>=', $filters['start_date']);
         }
 
         if (!empty($filters['end_date'] ?? null)) {
-            $query->where('payment_date', '<=', $filters['end_date']);
+            $query->where('property_subscription_payments.payment_date', '<=', $filters['end_date']);
         }
 
         $this->applyPaymentSort($query, $filters['sort'] ?? null);
@@ -345,31 +355,8 @@ class PropertySubscriptionService
      */
     public function workspaceReport(array $filters = []): array
     {
-        $paymentSummary = DB::connection('base')->table('property_subscription_payments')
-            ->select('tenant_id')
-            ->selectRaw('COUNT(id) as payments_count')
-            ->selectRaw('COALESCE(SUM(total_amount_cents), 0) as total_collected_amount_cents');
-
-        if (!empty($filters['start_date'] ?? null)) {
-            $paymentSummary->where('payment_date', '>=', $filters['start_date']);
-        }
-
-        if (!empty($filters['end_date'] ?? null)) {
-            $paymentSummary->where('payment_date', '<=', $filters['end_date']);
-        }
-
-        $paymentSummary->groupBy('tenant_id');
-
-        $statusExpression = $this->effectiveStatusExpression('property_subscriptions');
-        $propertySummary = DB::connection('base')->table('workspace_properties')
-            ->leftJoin('property_subscriptions', 'property_subscriptions.workspace_property_id', '=', 'workspace_properties.id')
-            ->whereNull('workspace_properties.property_deleted_at')
-            ->select('workspace_properties.tenant_id')
-            ->selectRaw('COUNT(workspace_properties.id) as total_properties')
-            ->selectRaw("SUM(CASE WHEN {$statusExpression} = 'active' THEN 1 ELSE 0 END) as active_subscribed_properties")
-            ->selectRaw("SUM(CASE WHEN {$statusExpression} = 'expired' THEN 1 ELSE 0 END) as expired_properties")
-            ->selectRaw("SUM(CASE WHEN {$statusExpression} = 'unsubscribed' THEN 1 ELSE 0 END) as unsubscribed_properties")
-            ->groupBy('workspace_properties.tenant_id');
+        $paymentSummary = $this->workspacePaymentSummaryQuery($filters);
+        $propertySummary = $this->workspacePropertySummaryQuery();
 
         $query = Tenant::query()
             ->leftJoinSub($paymentSummary, 'payment_summary', 'payment_summary.tenant_id', '=', 'tenants.id')
@@ -435,6 +422,8 @@ class PropertySubscriptionService
      */
     public function expiredPropertiesReport(array $filters = []): LengthAwarePaginator
     {
+        $today = Carbon::today()->toDateString();
+
         $query = DB::connection('base')->table('workspace_properties')
             ->join('tenants', 'tenants.id', '=', 'workspace_properties.tenant_id')
             ->leftJoin('property_subscriptions', 'property_subscriptions.workspace_property_id', '=', 'workspace_properties.id')
@@ -450,7 +439,7 @@ class PropertySubscriptionService
                         $expiredBuilder
                             ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
                             ->whereNotNull('property_subscriptions.current_period_ends_on')
-                            ->where('property_subscriptions.current_period_ends_on', '<', Carbon::today()->toDateString());
+                            ->where('property_subscriptions.current_period_ends_on', '<', $today);
                     });
             })
             ->select([
@@ -472,7 +461,7 @@ class PropertySubscriptionService
                 'billing_rules.price_cents',
                 'billing_profiles.currency',
             ])
-            ->selectRaw($this->effectiveStatusExpression('property_subscriptions').' as effective_status');
+            ->selectRaw($this->effectiveStatusExpression('property_subscriptions', $today).' as effective_status');
 
         if (!empty($filters['search'] ?? null)) {
             $search = trim((string) $filters['search']);
@@ -526,7 +515,7 @@ class PropertySubscriptionService
         }
 
         if ($workspaceProperty->property_deleted_at) {
-            throw new InvalidArgumentException('Payments cannot be recorded for a deleted property.');
+            throw new InvalidArgumentException('Payment cannot be recorded because this property has been deleted.');
         }
 
         return $workspaceProperty;
@@ -552,7 +541,7 @@ class PropertySubscriptionService
             ->first();
 
         if (!$billingRule || !$billingRule->profile || $billingRule->profile->status !== 'active') {
-            throw new InvalidArgumentException('The selected billing rule is not active for the provided payment date.');
+            throw new InvalidArgumentException('The selected billing rule is not valid for the payment date you entered.');
         }
 
         return $billingRule;
@@ -693,21 +682,23 @@ class PropertySubscriptionService
      */
     private function applySubscriptionStatusFilter(EloquentBuilder $query, string $status, string $alias): void
     {
+        $today = Carbon::today()->toDateString();
+
         match ($status) {
             PropertySubscription::STATUS_ACTIVE => $query
                 ->where("{$alias}.status", PropertySubscription::STATUS_ACTIVE)
-                ->where(function (EloquentBuilder $builder) use ($alias) {
+                ->where(function (EloquentBuilder $builder) use ($alias, $today) {
                     $builder
                         ->whereNull("{$alias}.current_period_ends_on")
-                        ->orWhere("{$alias}.current_period_ends_on", '>=', Carbon::today()->toDateString());
+                        ->orWhere("{$alias}.current_period_ends_on", '>=', $today);
                 }),
-            PropertySubscription::STATUS_EXPIRED => $query->where(function (EloquentBuilder $builder) use ($alias) {
+            PropertySubscription::STATUS_EXPIRED => $query->where(function (EloquentBuilder $builder) use ($alias, $today) {
                 $builder
                     ->where("{$alias}.status", PropertySubscription::STATUS_EXPIRED)
-                    ->orWhere(function (EloquentBuilder $innerQuery) use ($alias) {
+                    ->orWhere(function (EloquentBuilder $innerQuery) use ($alias, $today) {
                         $innerQuery
                             ->where("{$alias}.status", PropertySubscription::STATUS_ACTIVE)
-                            ->where("{$alias}.current_period_ends_on", '<', Carbon::today()->toDateString());
+                            ->where("{$alias}.current_period_ends_on", '<', $today);
                     });
             }),
             PropertySubscription::STATUS_UNSUBSCRIBED => $query->where(function (EloquentBuilder $builder) use ($alias) {
@@ -779,6 +770,25 @@ class PropertySubscriptionService
     }
 
     /**
+     * Resolve active payment from already loaded payments when available.
+     */
+    private function resolveActivePaymentFromLoadedPayments(WorkspaceProperty $workspaceProperty): ?PropertySubscriptionPayment
+    {
+        $loadedPayments = $workspaceProperty->getRelation('payments');
+
+        if ($loadedPayments) {
+            $today = Carbon::today()->toDateString();
+
+            return $loadedPayments->first(
+                fn (PropertySubscriptionPayment $payment) => $payment->coverage_starts_on <= $today
+                    && $payment->coverage_ends_on >= $today
+            );
+        }
+
+        return $this->resolveActivePayment($workspaceProperty);
+    }
+
+    /**
      * Cached workspace report totals.
      */
     private function cachedWorkspaceReportTotals(array $filters, $paymentSummary, $propertySummary): object
@@ -816,24 +826,66 @@ class PropertySubscriptionService
     }
 
     /**
+     * Workspace payment summary query grouped by tenant.
+     */
+    private function workspacePaymentSummaryQuery(array $filters = [])
+    {
+        $query = DB::connection('base')->table('property_subscription_payments')
+            ->select('tenant_id')
+            ->selectRaw('COUNT(id) as payments_count')
+            ->selectRaw('COALESCE(SUM(total_amount_cents), 0) as total_collected_amount_cents');
+
+        if (!empty($filters['start_date'] ?? null)) {
+            $query->where('payment_date', '>=', $filters['start_date']);
+        }
+
+        if (!empty($filters['end_date'] ?? null)) {
+            $query->where('payment_date', '<=', $filters['end_date']);
+        }
+
+        return $query->groupBy('tenant_id');
+    }
+
+    /**
+     * Workspace property summary query grouped by tenant.
+     */
+    private function workspacePropertySummaryQuery()
+    {
+        $today = Carbon::today()->toDateString();
+        $statusExpression = $this->effectiveStatusExpression('property_subscriptions', $today);
+
+        return DB::connection('base')->table('workspace_properties')
+            ->leftJoin('property_subscriptions', 'property_subscriptions.workspace_property_id', '=', 'workspace_properties.id')
+            ->whereNull('workspace_properties.property_deleted_at')
+            ->select('workspace_properties.tenant_id')
+            ->selectRaw('COUNT(workspace_properties.id) as total_properties')
+            ->selectRaw("SUM(CASE WHEN {$statusExpression} = 'active' THEN 1 ELSE 0 END) as active_subscribed_properties")
+            ->selectRaw("SUM(CASE WHEN {$statusExpression} = 'expired' THEN 1 ELSE 0 END) as expired_properties")
+            ->selectRaw("SUM(CASE WHEN {$statusExpression} = 'unsubscribed' THEN 1 ELSE 0 END) as unsubscribed_properties")
+            ->groupBy('workspace_properties.tenant_id');
+    }
+
+    /**
      * Apply expired properties status filter.
      */
     private function applyExpiredPropertiesStatusFilter($query, string $status): void
     {
+        $today = Carbon::today()->toDateString();
+
         match ($status) {
             PropertySubscription::STATUS_UNSUBSCRIBED => $query->where(function ($builder) {
                 $builder
                     ->whereNull('property_subscriptions.id')
                     ->orWhere('property_subscriptions.status', PropertySubscription::STATUS_UNSUBSCRIBED);
             }),
-            PropertySubscription::STATUS_EXPIRED => $query->where(function ($builder) {
+            PropertySubscription::STATUS_EXPIRED => $query->where(function ($builder) use ($today) {
                 $builder
                     ->where('property_subscriptions.status', PropertySubscription::STATUS_EXPIRED)
-                    ->orWhere(function ($innerBuilder) {
+                    ->orWhere(function ($innerBuilder) use ($today) {
                         $innerBuilder
                             ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
                             ->whereNotNull('property_subscriptions.current_period_ends_on')
-                            ->where('property_subscriptions.current_period_ends_on', '<', Carbon::today()->toDateString());
+                            ->where('property_subscriptions.current_period_ends_on', '<', $today);
                     });
             }),
             default => null,
@@ -921,10 +973,12 @@ class PropertySubscriptionService
     /**
      * Effective status expression.
      */
-    private function effectiveStatusExpression(string $alias): string
+    private function effectiveStatusExpression(string $alias, ?string $today = null): string
     {
+        $today = $today ?: Carbon::today()->toDateString();
+
         return "CASE
-            WHEN {$alias}.status = 'active' AND {$alias}.current_period_ends_on IS NOT NULL AND {$alias}.current_period_ends_on < CURRENT_DATE THEN 'expired'
+            WHEN {$alias}.status = 'active' AND {$alias}.current_period_ends_on IS NOT NULL AND {$alias}.current_period_ends_on < '{$today}' THEN 'expired'
             WHEN {$alias}.status IS NULL THEN 'unsubscribed'
             ELSE {$alias}.status
         END";

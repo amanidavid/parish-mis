@@ -5,6 +5,7 @@ namespace App\Services\V1\Occupancy;
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
 use App\Models\Tenant\Unit;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 
@@ -79,11 +80,11 @@ class CustomerContractRuleService
         $query = CustomerContract::query()
             ->where('unit_id', $unitId)
             ->whereIn('status', self::OVERLAP_BLOCKING_CONTRACT_STATUSES)
-            ->whereDate('start_date', '<=', $endDate ?? self::OPEN_ENDED_CONTRACT_END_DATE)
+            ->where('start_date', '<=', $endDate ?? self::OPEN_ENDED_CONTRACT_END_DATE)
             ->where(function (Builder $innerQuery) use ($startDate) {
                 $innerQuery
                     ->whereNull('end_date')
-                    ->orWhereDate('end_date', '>=', $startDate);
+                    ->orWhere('end_date', '>=', $startDate);
             });
 
         if ($ignoreContractId) {
@@ -103,11 +104,11 @@ class CustomerContractRuleService
         $hasActiveOccupancy = CustomerContract::query()
             ->where('unit_id', $unitId)
             ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-            ->whereDate('start_date', '<=', $today)
+            ->where('start_date', '<=', $today)
             ->where(function (Builder $query) use ($today) {
                 $query
                     ->whereNull('end_date')
-                    ->orWhereDate('end_date', '>=', $today);
+                    ->orWhere('end_date', '>=', $today);
             })
             ->exists();
 
@@ -116,6 +117,162 @@ class CustomerContractRuleService
             ->update([
                 'status' => $hasActiveOccupancy ? 'occupied' : 'vacant',
             ]);
+    }
+
+    /**
+     * Sync one or more unit occupancy statuses from their effective active contracts.
+     *
+     * @param  array<int, int>  $unitIds
+     */
+    public function syncUnitOccupancyStatuses(array $unitIds): int
+    {
+        $unitIds = collect($unitIds)
+            ->filter(fn ($id) => (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($unitIds === []) {
+            return 0;
+        }
+
+        $today = Carbon::today()->toDateString();
+        $activeUnitIds = $this->activeCustomerContractQuery($today)
+            ->whereIn('unit_id', $unitIds)
+            ->distinct()
+            ->pluck('unit_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $occupied = Unit::query()
+            ->whereIn('id', $unitIds)
+            ->whereIn('id', $activeUnitIds)
+            ->where('status', '!=', 'occupied')
+            ->update([
+                'status' => 'occupied',
+            ]);
+
+        $vacantQuery = Unit::query()
+            ->whereIn('id', $unitIds)
+            ->where('status', '!=', 'vacant');
+
+        if ($activeUnitIds !== []) {
+            $vacantQuery->whereNotIn('id', $activeUnitIds);
+        }
+
+        $vacant = $vacantQuery->update([
+            'status' => 'vacant',
+        ]);
+
+        return $occupied + $vacant;
+    }
+
+    /**
+     * Sync one or more customer statuses from their effective active contracts.
+     *
+     * @param  array<int, int>  $customerIds
+     */
+    public function syncCustomerStatuses(array $customerIds): int
+    {
+        $customerIds = collect($customerIds)
+            ->filter(fn ($id) => (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        if ($customerIds === []) {
+            return 0;
+        }
+
+        $today = Carbon::today()->toDateString();
+        $activeCustomerIds = $this->activeCustomerContractQuery($today)
+            ->whereIn('customer_id', $customerIds)
+            ->distinct()
+            ->pluck('customer_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $activated = Customer::query()
+            ->whereIn('id', $customerIds)
+            ->whereIn('id', $activeCustomerIds)
+            ->where('status', '!=', Customer::STATUS_ACTIVE)
+            ->update([
+                'status' => Customer::STATUS_ACTIVE,
+            ]);
+
+        $inactiveQuery = Customer::query()
+            ->whereIn('id', $customerIds)
+            ->where('status', '!=', Customer::STATUS_INACTIVE);
+
+        if ($activeCustomerIds !== []) {
+            $inactiveQuery->whereNotIn('id', $activeCustomerIds);
+        }
+
+        $inactivated = $inactiveQuery->update([
+            'status' => Customer::STATUS_INACTIVE,
+        ]);
+
+        return $activated + $inactivated;
+    }
+
+    /**
+     * Sync all customer statuses from their effective active contracts.
+     */
+    public function syncAllCustomerStatuses(): int
+    {
+        $today = Carbon::today()->toDateString();
+        $activeCustomersSubquery = $this->activeCustomerIdsSubquery($today);
+
+        $activated = Customer::query()
+            ->where('status', '!=', Customer::STATUS_ACTIVE)
+            ->whereIn('id', $activeCustomersSubquery)
+            ->update([
+                'status' => Customer::STATUS_ACTIVE,
+            ]);
+
+        $inactivated = Customer::query()
+            ->where('status', '!=', Customer::STATUS_INACTIVE)
+            ->whereNotIn('id', $this->activeCustomerIdsSubquery($today))
+            ->update([
+                'status' => Customer::STATUS_INACTIVE,
+            ]);
+
+        return $activated + $inactivated;
+    }
+
+    /**
+     * Query active customer contracts for a target date.
+     */
+    private function activeCustomerContractQuery(string $today): Builder
+    {
+        return CustomerContract::query()
+            ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
+            ->where('start_date', '<=', $today)
+            ->where(function (Builder $query) use ($today) {
+                $query
+                    ->whereNull('end_date')
+                    ->orWhere('end_date', '>=', $today);
+            });
+    }
+
+    /**
+     * Subquery of customer ids with at least one currently active contract.
+     */
+    private function activeCustomerIdsSubquery(string $today): QueryBuilder
+    {
+        return CustomerContract::query()
+            ->select('customer_id')
+            ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
+            ->where('start_date', '<=', $today)
+            ->where(function (Builder $query) use ($today) {
+                $query
+                    ->whereNull('end_date')
+                    ->orWhere('end_date', '>=', $today);
+            })
+            ->groupBy('customer_id')
+            ->toBase();
     }
 
     /**

@@ -201,6 +201,7 @@ class CustomerContractController extends Controller
             ]);
 
             $this->ruleService->syncUnitOccupancyStatus($unitId);
+            $this->ruleService->syncCustomerStatuses([$customer->id]);
 
             return $contract;
         });
@@ -286,6 +287,7 @@ class CustomerContractController extends Controller
 
         DB::transaction(function () use ($customerContract, $customer, $unitId, $data) {
             $previousUnitId = $customerContract->unit_id;
+            $previousCustomerId = $customerContract->customer_id;
 
             $customerContract->fill([
                 'customer_id' => $customer->id,
@@ -300,6 +302,7 @@ class CustomerContractController extends Controller
             ])->save();
 
             $this->ruleService->syncUnitOccupancyStatus($unitId);
+            $this->ruleService->syncCustomerStatuses([$customer->id, $previousCustomerId]);
 
             if ($previousUnitId !== $unitId) {
                 $this->ruleService->syncUnitOccupancyStatus($previousUnitId);
@@ -335,8 +338,10 @@ class CustomerContractController extends Controller
 
         DB::transaction(function () use ($customerContract) {
             $unitId = $customerContract->unit_id;
+            $customerId = $customerContract->customer_id;
             $customerContract->delete();
             $this->ruleService->syncUnitOccupancyStatus($unitId);
+            $this->ruleService->syncCustomerStatuses([$customerId]);
         });
 
         return ApiResponse::success(ApiMessages::deleted('customer contract'));
@@ -431,7 +436,7 @@ class CustomerContractController extends Controller
                 }
             } catch (InvalidArgumentException $exception) {
                 return ApiResponse::error(
-                    'Property subscription coverage is required.',
+                    'The selected contract start date is not paid for. Choose a start date that falls within the workspace trial period or the property subscription paid period.',
                     ['property_subscription' => [$exception->getMessage()]],
                     422
                 );

@@ -11,44 +11,56 @@ use Illuminate\Support\Str;
 
 class WorkspaceService
 {
+    private const DEFAULT_CREATED_VIA = 'self_service';
+    private const DEFAULT_TENANT_STATUS = 'active';
+    private const DEFAULT_PROVISIONING_STATUS = 'pending';
+
     /**
      * Create workspace for user.
      */
-    public function createWorkspaceForUser(BaseUser $baseUser, array $data, string $createdVia = 'self_service'): Tenant
+    public function createWorkspaceForUser(BaseUser $baseUser, array $data, string $createdVia = self::DEFAULT_CREATED_VIA): Tenant
     {
-        $existingWorkspace = $this->findOwnedWorkspaceForUser($baseUser->id);
-        if ($existingWorkspace) {
-            throw new \InvalidArgumentException(
-                'This account already has a workspace. Add properties inside the existing workspace instead of creating another database.'
-            );
-        }
-
         $normalizedName = WorkspaceName::normalize($data['name']);
         $displayName = WorkspaceName::display($data['name'], $data['display_name'] ?? null);
-        $dbName = $data['database'] ?? ('tenant_'.$normalizedName);
-
-        $exists = Tenant::query()
-            ->where(fn ($query) => $query
-                ->where('name', $normalizedName)
-                ->orWhere('database', $dbName))
-            ->exists();
-
-        if ($exists) {
-            throw new \InvalidArgumentException('Workspace with the same name or database already exists.');
-        }
+        $dbName = $this->normalizeDatabaseName($data['database'] ?? ('tenant_'.$normalizedName));
 
         return DB::connection('base')->transaction(function () use ($baseUser, $createdVia, $data, $dbName, $displayName, $normalizedName) {
+            $ownedWorkspace = Tenant::query()
+                ->select('tenants.id')
+                ->join('user_tenants', 'user_tenants.tenant_id', '=', 'tenants.id')
+                ->where('user_tenants.user_id', $baseUser->id)
+                ->where('user_tenants.is_owner', true)
+                ->lockForUpdate()
+                ->first();
+
+            if ($ownedWorkspace) {
+                throw new \InvalidArgumentException(
+                    'This account already has a workspace. Add properties inside the existing workspace instead of creating another database.'
+                );
+            }
+
+            $exists = Tenant::query()
+                ->where(fn ($query) => $query
+                    ->where('name', $normalizedName)
+                    ->orWhere('database', $dbName))
+                ->lockForUpdate()
+                ->exists();
+
+            if ($exists) {
+                throw new \InvalidArgumentException('Workspace with the same name or database already exists.');
+            }
+
             $tenant = Tenant::query()->create([
                 'uuid' => (string) Str::uuid(),
                 'name' => $normalizedName,
                 'display_name' => $displayName,
                 'database' => $dbName,
-                'status' => 'active',
-                'provisioning_status' => 'pending',
+                'status' => self::DEFAULT_TENANT_STATUS,
+                'provisioning_status' => self::DEFAULT_PROVISIONING_STATUS,
                 'provision_attempts' => 0,
                 'meta' => [
                     'plan_uuid' => $data['plan_uuid'] ?? null,
-                    'billing_profile_uuid' => $data['billing_profile_uuid'] ?? null,
+                    'billing_rule_uuid' => $data['billing_rule_uuid'] ?? ($data['billing_profile_uuid'] ?? null),
                     'created_via' => $createdVia,
                 ],
             ]);
@@ -93,5 +105,17 @@ class WorkspaceService
             ->where('user_tenants.is_owner', true)
             ->orderBy('tenants.id')
             ->first();
+    }
+
+    /**
+     * Normalize workspace database name to the same safe format used by workspace keys.
+     */
+    private function normalizeDatabaseName(string $database): string
+    {
+        $normalized = WorkspaceName::normalize($database);
+
+        return str_starts_with($normalized, 'tenant_')
+            ? $normalized
+            : 'tenant_'.$normalized;
     }
 }

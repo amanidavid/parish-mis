@@ -12,6 +12,15 @@ class PlatformOverviewService
     private const CACHE_TTL_SECONDS = 30;
 
     private const RECENT_WORKSPACES_LIMIT = 10;
+    private const TENANT_COLUMNS = [
+        'uuid',
+        'name',
+        'display_name',
+        'database',
+        'status',
+        'provisioning_status',
+        'created_at',
+    ];
 
     /**
      * Handle the overview request.
@@ -41,25 +50,16 @@ class PlatformOverviewService
             ->selectRaw("SUM(CASE WHEN provisioning_status = 'failed' THEN 1 ELSE 0 END) as failed_workspaces")
             ->first();
 
-        $billingOverview = DB::connection('base')
-            ->table('billing_profiles')
-            ->selectRaw('COUNT(*) as total_billing_profiles')
-            ->selectRaw("SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_billing_profiles")
-            ->selectRaw("SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) as inactive_billing_profiles")
-            ->selectRaw("SUM(CASE WHEN is_default = true THEN 1 ELSE 0 END) as default_billing_profiles")
+        $billingRuleOverview = DB::connection('base')
+            ->table('billing_rules')
+            ->selectRaw('COUNT(*) as total_billing_rules')
+            ->selectRaw("SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_billing_rules")
+            ->selectRaw("SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) as inactive_billing_rules")
             ->first();
 
         $recentWorkspaces = DB::connection('base')
             ->table('tenants')
-            ->select([
-                'uuid',
-                'name',
-                'display_name',
-                'database',
-                'status',
-                'provisioning_status',
-                'created_at',
-            ])
+            ->select(self::TENANT_COLUMNS)
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->limit(self::RECENT_WORKSPACES_LIMIT)
@@ -71,8 +71,8 @@ class PlatformOverviewService
                 'active_workspaces' => (int) ($tenantOverview->active_workspaces ?? 0),
                 'suspended_workspaces' => (int) ($tenantOverview->suspended_workspaces ?? 0),
                 'provisioning_failed_workspaces' => (int) ($tenantOverview->failed_workspaces ?? 0),
-                'total_billing_profiles' => (int) ($billingOverview->total_billing_profiles ?? 0),
-                'active_billing_profiles' => (int) ($billingOverview->active_billing_profiles ?? 0),
+                'total_billing_rules' => (int) ($billingRuleOverview->total_billing_rules ?? 0),
+                'active_billing_rules' => (int) ($billingRuleOverview->active_billing_rules ?? 0),
             ],
             'workspaces' => [
                 'total' => (int) ($tenantOverview->total_workspaces ?? 0),
@@ -83,11 +83,10 @@ class PlatformOverviewService
                 'ready' => (int) ($tenantOverview->ready_workspaces ?? 0),
                 'failed' => (int) ($tenantOverview->failed_workspaces ?? 0),
             ],
-            'billing_profiles' => [
-                'total' => (int) ($billingOverview->total_billing_profiles ?? 0),
-                'active' => (int) ($billingOverview->active_billing_profiles ?? 0),
-                'inactive' => (int) ($billingOverview->inactive_billing_profiles ?? 0),
-                'default' => (int) ($billingOverview->default_billing_profiles ?? 0),
+            'billing_rules' => [
+                'total' => (int) ($billingRuleOverview->total_billing_rules ?? 0),
+                'active' => (int) ($billingRuleOverview->active_billing_rules ?? 0),
+                'inactive' => (int) ($billingRuleOverview->inactive_billing_rules ?? 0),
             ],
             'recent_workspaces' => $recentWorkspaces,
             'generated_at' => now()->format('Y-m-d H:i:s'),

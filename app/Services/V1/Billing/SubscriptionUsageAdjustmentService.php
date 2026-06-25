@@ -257,11 +257,11 @@ class SubscriptionUsageAdjustmentService
                 ->first();
 
             if (!$lockedAdjustment || $lockedAdjustment->tenant_id !== $tenant->id) {
-                throw new InvalidArgumentException('The selected usage adjustment could not be found for this workspace.');
+                throw new InvalidArgumentException('The selected usage adjustment was not found.');
             }
 
             if ($lockedAdjustment->status !== SubscriptionUsageAdjustment::STATUS_PENDING) {
-                throw new InvalidArgumentException('Only pending usage adjustments can be applied.');
+                throw new InvalidArgumentException('Only pending usage adjustments can be processed.');
             }
 
             $baseline = $this->baselineForPeriod(
@@ -270,7 +270,7 @@ class SubscriptionUsageAdjustmentService
             );
 
             if (!$baseline) {
-                throw new InvalidArgumentException('The current billing baseline could not be resolved for this workspace.');
+                throw new InvalidArgumentException('The current billing setup could not be resolved for this workspace.');
             }
 
             $this->advanceBaseline($baseline, $lockedAdjustment);
@@ -296,11 +296,11 @@ class SubscriptionUsageAdjustmentService
                 ->first();
 
             if (!$lockedAdjustment || $lockedAdjustment->tenant_id !== $tenant->id) {
-                throw new InvalidArgumentException('The selected usage adjustment could not be found for this workspace.');
+                throw new InvalidArgumentException('The selected usage adjustment was not found.');
             }
 
             if ($lockedAdjustment->status !== SubscriptionUsageAdjustment::STATUS_PENDING) {
-                throw new InvalidArgumentException('Only pending usage adjustments can be waived.');
+                throw new InvalidArgumentException('Only pending usage adjustments can be processed.');
             }
 
             $baseline = $this->baselineForPeriod(
@@ -309,7 +309,7 @@ class SubscriptionUsageAdjustmentService
             );
 
             if (!$baseline) {
-                throw new InvalidArgumentException('The current billing baseline could not be resolved for this workspace.');
+                throw new InvalidArgumentException('The current billing setup could not be resolved for this workspace.');
             }
 
             $this->advanceBaseline($baseline, $lockedAdjustment);
