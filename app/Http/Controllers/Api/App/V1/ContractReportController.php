@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\ContractReportByPropertyRequest;
 use App\Http\Requests\Api\App\V1\ContractReportChartRequest;
 use App\Http\Requests\Api\App\V1\ContractReportExpiringRequest;
+use App\Http\Requests\Api\App\V1\ContractReportMonthlyActiveAmountChartRequest;
+use App\Http\Requests\Api\App\V1\ContractReportSummaryCardsRequest;
 use App\Http\Requests\Api\App\V1\ContractReportSummaryRequest;
 use App\Http\Resources\App\V1\ContractExpiringReportResource;
 use App\Http\Resources\App\V1\ContractChartBucketResource;
@@ -36,6 +38,22 @@ class ContractReportController extends Controller
         return ApiResponse::success(
             'Contract report summary retrieved successfully.',
             $this->contractReportService->summary($tenantUser, $request->validated())
+        );
+    }
+
+    /**
+     * Handle the summary cards request.
+     */
+    public function summaryCards(ContractReportSummaryCardsRequest $request)
+    {
+        $tenantUser = $this->resolveTenantUser();
+        if (!$tenantUser instanceof TenantUser) {
+            return $tenantUser;
+        }
+
+        return ApiResponse::success(
+            'Contract summary cards retrieved successfully.',
+            $this->contractReportService->summaryCards($tenantUser, $request->validated())
         );
     }
 
@@ -89,6 +107,22 @@ class ContractReportController extends Controller
             'summary' => $report['summary'],
             'series' => ContractChartBucketResource::collection(collect($report['series']))->resolve(),
         ]);
+    }
+
+    /**
+     * Handle the monthly active amount chart request.
+     */
+    public function monthlyActiveAmountChart(ContractReportMonthlyActiveAmountChartRequest $request)
+    {
+        $tenantUser = $this->resolveTenantUser();
+        if (!$tenantUser instanceof TenantUser) {
+            return $tenantUser;
+        }
+
+        return ApiResponse::success(
+            'Monthly active contract amount chart retrieved successfully.',
+            $this->contractReportService->monthlyActiveAmountChart($tenantUser, $request->validated())
+        );
     }
 
     /**

@@ -124,8 +124,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('reports/dashboard-overview', [DashboardReportController::class, 'overview']);
                 Route::prefix('reports/contracts')->group(function () {
                     Route::get('summary', [ContractReportController::class, 'summary']);
+                    Route::get('summary-cards', [ContractReportController::class, 'summaryCards']);
                     Route::get('by-property', [ContractReportController::class, 'byProperty']);
                     Route::get('chart', [ContractReportController::class, 'chart']);
+                    Route::get('monthly-active-amount-chart', [ContractReportController::class, 'monthlyActiveAmountChart']);
                     Route::get('expiring', [ContractReportController::class, 'expiring']);
                 });
                 Route::prefix('reports/maintenance')->group(function () {

@@ -73,6 +73,58 @@ class ContractReportService
     }
 
     /**
+     * Build contract summary cards using a start-date-based reporting window and expense dates for costs.
+     */
+    public function summaryCards(User $tenantUser, array $filters = []): array
+    {
+        $scope = $this->resolveScope($tenantUser);
+        [$startDate, $endDate, $range] = $this->resolveSummaryCardsWindow($filters);
+
+        $contractsQuery = $this->tenantTable('customer_contracts')
+            ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
+            ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
+            ->whereBetween('customer_contracts.start_date', [$startDate, $endDate]);
+
+        $contractsQuery = $this->applyPropertyScopeToColumn($contractsQuery, $scope, 'property_floors.property_id');
+        $contractsQuery = $this->applyContractPropertyFilter($contractsQuery, $filters);
+
+        $contractTotals = (clone $contractsQuery)
+            ->selectRaw('COUNT(customer_contracts.id) as total_contracts')
+            ->selectRaw("COALESCE(SUM(CASE WHEN customer_contracts.status = 'active' THEN customer_contracts.amount ELSE 0 END), 0) as active_contract_amount")
+            ->first();
+
+        $expensesQuery = $this->tenantTable('maintenance_expenses')
+            ->join('maintenance_jobs', 'maintenance_jobs.id', '=', 'maintenance_expenses.maintenance_job_id')
+            ->whereBetween('maintenance_expenses.expense_date', [$startDate, $endDate]);
+
+        $expensesQuery = $this->applyPropertyScopeToColumn($expensesQuery, $scope, 'maintenance_jobs.property_id');
+        $expensesQuery = $this->applyExpensePropertyFilter($expensesQuery, $filters);
+
+        $expenseTotals = (clone $expensesQuery)
+            ->selectRaw('COALESCE(SUM(maintenance_expenses.amount), 0) as total_expenses')
+            ->first();
+
+        $activeContractAmount = (float) ($contractTotals->active_contract_amount ?? 0);
+        $totalExpenses = (float) ($expenseTotals->total_expenses ?? 0);
+
+        return [
+            'filters' => [
+                'property_uuid' => $filters['property_uuid'] ?? null,
+                'range' => $range,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'reporting_rule' => 'start_date_based',
+            ],
+            'summary_cards' => [
+                'total_contracts' => (int) ($contractTotals->total_contracts ?? 0),
+                'active_contract_amount' => $activeContractAmount,
+                'total_expenses' => $totalExpenses,
+                'net_active_contract_amount' => $activeContractAmount - $totalExpenses,
+            ],
+        ];
+    }
+
+    /**
      * Handle the by property request.
      */
     public function byProperty(User $tenantUser, array $filters = []): LengthAwarePaginator
@@ -249,6 +301,72 @@ class ContractReportService
     }
 
     /**
+     * Build the year-based monthly bar chart for active contract amounts using contract start month buckets.
+     */
+    public function monthlyActiveAmountChart(User $tenantUser, array $filters = []): array
+    {
+        $scope = $this->resolveScope($tenantUser);
+        $year = (int) ($filters['year'] ?? now()->year);
+        $startDate = Carbon::create($year, 1, 1)->toDateString();
+        $endDate = Carbon::create($year, 12, 31)->toDateString();
+
+        $query = $this->tenantTable('customer_contracts')
+            ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
+            ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
+            ->where('customer_contracts.status', self::STATUS_ACTIVE)
+            ->whereBetween('customer_contracts.start_date', [$startDate, $endDate]);
+
+        $query = $this->applyPropertyScopeToColumn($query, $scope, 'property_floors.property_id');
+        $query = $this->applyContractPropertyFilter($query, $filters);
+
+        [$bucketSql, $bucketLabelSql] = $this->monthlyChartBucketExpressions();
+
+        $rows = $query
+            ->selectRaw($bucketSql.' as bucket_key')
+            ->selectRaw($bucketLabelSql.' as bucket_label')
+            ->selectRaw('COUNT(customer_contracts.id) as active_contracts_count')
+            ->selectRaw('COALESCE(SUM(customer_contracts.amount), 0) as active_contract_amount')
+            ->groupByRaw($bucketSql.', '.$bucketLabelSql)
+            ->orderBy('bucket_key')
+            ->get()
+            ->keyBy('bucket_key');
+
+        $series = collect(range(1, 12))
+            ->map(function (int $month) use ($year, $rows): array {
+                $bucketStart = Carbon::create($year, $month, 1);
+                $bucketKey = $bucketStart->toDateString();
+                $row = $rows->get($bucketKey);
+
+                return [
+                    'bucket_key' => $bucketKey,
+                    'bucket_label' => $bucketStart->format('F'),
+                    'month' => $month,
+                    'year' => $year,
+                    'active_contracts_count' => (int) ($row->active_contracts_count ?? 0),
+                    'active_contract_amount' => (float) ($row->active_contract_amount ?? 0),
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'filters' => [
+                'property_uuid' => $filters['property_uuid'] ?? null,
+                'year' => $year,
+                'start_date' => $startDate,
+                'end_date' => $endDate,
+                'reporting_rule' => 'start_date_based',
+                'metric' => 'active_contract_amount',
+            ],
+            'summary' => [
+                'active_contracts_count' => (int) collect($series)->sum('active_contracts_count'),
+                'active_contract_amount' => (float) collect($series)->sum('active_contract_amount'),
+            ],
+            'series' => $series,
+        ];
+    }
+
+    /**
      * Contracts base query.
      */
     private function contractsBaseQuery(
@@ -375,6 +493,35 @@ class ContractReportService
     }
 
     /**
+     * Resolve the summary-cards reporting window from either preset ranges or a custom date range.
+     */
+    private function resolveSummaryCardsWindow(array $filters): array
+    {
+        $range = (string) ($filters['range'] ?? '3_months');
+        $today = now()->startOfDay();
+
+        if ($range === 'custom') {
+            return [
+                Carbon::parse($filters['start_date'])->toDateString(),
+                Carbon::parse($filters['end_date'])->toDateString(),
+                $range,
+            ];
+        }
+
+        $months = match ($range) {
+            '6_months' => 6,
+            '12_months' => 12,
+            default => 3,
+        };
+
+        return [
+            $today->copy()->subMonthsNoOverflow($months - 1)->startOfMonth()->toDateString(),
+            $today->copy()->endOfDay()->toDateString(),
+            $range,
+        ];
+    }
+
+    /**
      * Resolve chart window.
      */
     private function resolveChartWindow(array $filters): array
@@ -451,6 +598,52 @@ class ContractReportService
                 "DATE_FORMAT(customer_contracts.start_date, '%b %Y')",
             ],
         };
+    }
+
+    /**
+     * Month chart bucket expressions that return keys aligned to YYYY-MM-01 for direct lookup in a full January-December series.
+     */
+    private function monthlyChartBucketExpressions(): array
+    {
+        $driver = DB::connection($this->tenantConnectionName())->getDriverName();
+
+        if ($driver === 'pgsql') {
+            return [
+                "TO_CHAR(DATE_TRUNC('month', customer_contracts.start_date), 'YYYY-MM-DD')",
+                "TO_CHAR(DATE_TRUNC('month', customer_contracts.start_date), 'Mon YYYY')",
+            ];
+        }
+
+        return [
+            "DATE_FORMAT(customer_contracts.start_date, '%Y-%m-01')",
+            "DATE_FORMAT(customer_contracts.start_date, '%b %Y')",
+        ];
+    }
+
+    /**
+     * Apply property uuid filter to a contract query that already joins property floors.
+     */
+    private function applyContractPropertyFilter(QueryBuilder $query, array $filters): QueryBuilder
+    {
+        if (!empty($filters['property_uuid'] ?? null)) {
+            $query->join('properties as filter_properties', 'filter_properties.id', '=', 'property_floors.property_id')
+                ->where('filter_properties.uuid', $filters['property_uuid']);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Apply property uuid filter to an expense query that already joins maintenance jobs.
+     */
+    private function applyExpensePropertyFilter(QueryBuilder $query, array $filters): QueryBuilder
+    {
+        if (!empty($filters['property_uuid'] ?? null)) {
+            $query->join('properties as filter_properties', 'filter_properties.id', '=', 'maintenance_jobs.property_id')
+                ->where('filter_properties.uuid', $filters['property_uuid']);
+        }
+
+        return $query;
     }
 
     /**
