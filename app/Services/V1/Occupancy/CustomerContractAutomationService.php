@@ -20,6 +20,7 @@ class CustomerContractAutomationService
     public function __construct(
         private TenantConnectionManager $tenantConnectionManager,
         private TenantProvisioningService $tenantProvisioningService,
+        private CustomerContractRuleService $customerContractRuleService,
     ) {
     }
 
@@ -60,56 +61,58 @@ class CustomerContractAutomationService
         return $this->runInTenantContext($tenant, function () {
             $today = Carbon::today()->toDateString();
             $connection = DB::connection($this->tenantConnectionManager->connectionName());
+            $timestamp = now();
 
-            return $connection->transaction(function () use ($connection, $today) {
+            return $connection->transaction(function () use ($connection, $today, $timestamp) {
+                $expiredContractRows = $connection->table('customer_contracts')
+                    ->select(['customer_id', 'unit_id'])
+                    ->where('status', 'active')
+                    ->whereNotNull('end_date')
+                    ->where('end_date', '<', $today)
+                    ->get();
+
+                $startingTodayRows = $connection->table('customer_contracts')
+                    ->select(['customer_id', 'unit_id'])
+                    ->where('status', 'active')
+                    ->where('start_date', '=', $today)
+                    ->where(function ($query) use ($today) {
+                        $query
+                            ->whereNull('end_date')
+                            ->orWhere('end_date', '>=', $today);
+                    })
+                    ->get();
+
+                $affectedCustomerIds = $expiredContractRows
+                    ->pluck('customer_id')
+                    ->merge($startingTodayRows->pluck('customer_id'))
+                    ->filter()
+                    ->map(fn ($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $affectedUnitIds = $expiredContractRows
+                    ->pluck('unit_id')
+                    ->merge($startingTodayRows->pluck('unit_id'))
+                    ->filter()
+                    ->map(fn ($id) => (int) $id)
+                    ->unique()
+                    ->values()
+                    ->all();
+
                 $expiredContracts = $connection->table('customer_contracts')
                     ->where('status', 'active')
                     ->whereNotNull('end_date')
                     ->where('end_date', '<', $today)
                     ->update([
                         'status' => 'expired',
-                        'updated_at' => now(),
+                        'updated_at' => $timestamp,
                     ]);
 
-                $occupiedUnits = $connection->table('units')
-                    ->where('status', '!=', 'occupied')
-                    ->whereExists(function ($query) use ($today) {
-                        $query->selectRaw('1')
-                            ->from('customer_contracts')
-                            ->whereColumn('customer_contracts.unit_id', 'units.id')
-                            ->whereIn('customer_contracts.status', CustomerContractRuleService::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-                            ->whereDate('customer_contracts.start_date', '<=', $today)
-                            ->where(function ($innerQuery) use ($today) {
-                                $innerQuery
-                                    ->whereNull('customer_contracts.end_date')
-                                    ->orWhereDate('customer_contracts.end_date', '>=', $today);
-                            });
-                    })
-                    ->update([
-                        'status' => 'occupied',
-                        'updated_at' => now(),
-                    ]);
+                $unitStatusUpdates = $this->customerContractRuleService->syncUnitOccupancyStatuses($affectedUnitIds);
+                $customerStatusUpdates = $this->customerContractRuleService->syncCustomerStatuses($affectedCustomerIds);
 
-                $vacantUnits = $connection->table('units')
-                    ->where('status', 'occupied')
-                    ->whereNotExists(function ($query) use ($today) {
-                        $query->selectRaw('1')
-                            ->from('customer_contracts')
-                            ->whereColumn('customer_contracts.unit_id', 'units.id')
-                            ->whereIn('customer_contracts.status', CustomerContractRuleService::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-                            ->whereDate('customer_contracts.start_date', '<=', $today)
-                            ->where(function ($innerQuery) use ($today) {
-                                $innerQuery
-                                    ->whereNull('customer_contracts.end_date')
-                                    ->orWhereDate('customer_contracts.end_date', '>=', $today);
-                            });
-                    })
-                    ->update([
-                        'status' => 'vacant',
-                        'updated_at' => now(),
-                    ]);
-
-                return $expiredContracts + $occupiedUnits + $vacantUnits;
+                return $expiredContracts + $unitStatusUpdates + $customerStatusUpdates;
             });
         });
     }
@@ -194,7 +197,7 @@ class CustomerContractAutomationService
     private function assertTenantReady(Tenant $tenant): void
     {
         if ($tenant->provisioning_status !== 'ready' || empty($tenant->database)) {
-            throw new InvalidArgumentException('This workspace is not provisioned yet, so contract automation cannot run.');
+            throw new InvalidArgumentException('Contract automation cannot run because workspace setup is not complete.');
         }
     }
 }

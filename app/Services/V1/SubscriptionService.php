@@ -25,6 +25,7 @@ use Illuminate\Support\Str;
 
 class SubscriptionService
 {
+    private const BILLING_PROFILE_COLUMNS = ['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'];
     /** Tracks property count usage for workspace-level subscription metering. */
     private const METRIC_PROPERTIES = 'properties';
     /** Tracks total registered units because billing profile rules are unit-band based. */
@@ -142,9 +143,22 @@ class SubscriptionService
     public function getWorkspaceSubscriptionSummary(Tenant $tenant): array
     {
         $subscription = $this->currentSubscription($tenant);
-        $billingProfile = $subscription?->billingProfile ?? $this->resolveWorkspaceBillingProfile($tenant);
+        $billingProfile = $this->resolveSubscriptionBillingProfile($tenant, $subscription);
         $pendingProfileChange = $subscription
             ? SubscriptionProfileChange::query()
+                ->select([
+                    'id',
+                    'uuid',
+                    'subscription_id',
+                    'status',
+                    'change_timing',
+                    'effective_at',
+                    'current_price_cents',
+                    'new_price_cents',
+                    'prorated_adjustment_cents',
+                    'old_billing_profile_id',
+                    'new_billing_profile_id',
+                ])
                 ->with(['oldBillingProfile:id,uuid,name,billing_interval,currency', 'newBillingProfile:id,uuid,name,billing_interval,currency'])
                 ->where('subscription_id', $subscription->id)
                 ->where('status', 'pending')
@@ -154,6 +168,19 @@ class SubscriptionService
             : null;
         $pendingUsageAdjustment = $subscription
             ? SubscriptionUsageAdjustment::query()
+                ->select([
+                    'id',
+                    'uuid',
+                    'subscription_id',
+                    'status',
+                    'adjustment_type',
+                    'effective_at',
+                    'prorated_adjustment_cents',
+                    'delta_price_cents',
+                    'baseline_registered_units_total',
+                    'current_registered_units_total',
+                    'created_at',
+                ])
                 ->where('subscription_id', $subscription->id)
                 ->where('status', SubscriptionUsageAdjustment::STATUS_PENDING)
                 ->orderByDesc('created_at')
@@ -261,7 +288,7 @@ class SubscriptionService
     {
         return $this->runInTenantContext($tenant, function () use ($tenant, $filters) {
             $subscription = $this->currentSubscription($tenant);
-            $billingProfile = $subscription?->billingProfile ?? $this->resolveWorkspaceBillingProfile($tenant);
+            $billingProfile = $this->resolveSubscriptionBillingProfile($tenant, $subscription);
             $rules = $billingProfile
                 ? $this->billingProfileService->activeRulesForDate($billingProfile)
                 : collect();
@@ -286,34 +313,13 @@ class SubscriptionService
                 ->paginate((int) ($filters['per_page'] ?? 15))
                 ->withQueryString();
 
-            $propertySubscriptions = WorkspaceProperty::query()
-                ->with(['subscription:id,workspace_property_id,status,current_period_ends_on'])
-                ->where('tenant_id', $tenant->id)
-                ->whereIn('property_uuid', $paginator->getCollection()->pluck('uuid')->all())
-                ->get()
-                ->keyBy('property_uuid');
+            $propertySubscriptions = $this->workspacePropertySubscriptionMap(
+                $tenant->id,
+                $paginator->getCollection()->pluck('uuid')
+            );
 
             $paginator->getCollection()->transform(function (Property $property) use ($billingProfile, $rules, $propertySubscriptions) {
-                $rule = $billingProfile
-                    ? $this->billingProfileService->matchingRuleFromCollection($rules, (int) $property->registered_units)
-                    : null;
-                $workspaceProperty = $propertySubscriptions->get($property->uuid);
-                $propertySubscription = $workspaceProperty?->subscription;
-
-                $property->setAttribute('matched_rule', $rule ? [
-                    'uuid' => $rule->uuid,
-                    'range_start' => $rule->range_start,
-                    'range_end' => $rule->range_end,
-                    'price_cents' => $rule->price_cents,
-                    'currency' => $rule->currency,
-                    'effective_from' => $rule->effective_from?->toDateString(),
-                    'effective_to' => $rule->effective_to?->toDateString(),
-                ] : null);
-                $property->setAttribute('estimated_price_cents', $rule?->price_cents ?? 0);
-                $property->setAttribute(
-                    'subscription_status',
-                    $propertySubscription?->effectiveStatus() ?? PropertySubscription::STATUS_UNSUBSCRIBED
-                );
+                $this->decoratePropertyUsageRow($property, $billingProfile, $rules, $propertySubscriptions->get($property->uuid));
 
                 return $property;
             });
@@ -329,6 +335,19 @@ class SubscriptionService
     public function currentSubscription(Tenant $tenant): ?Subscription
     {
         return Subscription::query()
+            ->select([
+                'id',
+                'uuid',
+                'tenant_id',
+                'plan_id',
+                'billing_profile_id',
+                'status',
+                'starts_at',
+                'ends_at',
+                'trial_ends_at',
+                'created_at',
+                'updated_at',
+            ])
             ->with(['plan', 'billingProfile'])
             ->where('tenant_id', $tenant->id)
             ->latest('id')
@@ -419,10 +438,10 @@ class SubscriptionService
             throw new HttpResponseException(
                 response()->json([
                     'success' => false,
-                    'message' => 'This workspace is currently suspended.',
+                    'message' => 'This workspace is suspended. Contact the platform administrator to restore access.',
                     'data' => null,
                     'errors' => [
-                        'workspace' => ['This workspace is currently suspended.'],
+                        'workspace' => ['This workspace is suspended. Contact the platform administrator to restore access.'],
                     ],
                 ], 422)
             );
@@ -432,10 +451,10 @@ class SubscriptionService
             throw new HttpResponseException(
                 response()->json([
                     'success' => false,
-                    'message' => 'This workspace is still being prepared.',
+                    'message' => 'This workspace setup is not complete yet. Please try again shortly.',
                     'data' => null,
                     'errors' => [
-                        'workspace' => ['This workspace is still being prepared.'],
+                        'workspace' => ['This workspace setup is not complete yet. Please try again shortly.'],
                     ],
                 ], 422)
             );
@@ -445,10 +464,10 @@ class SubscriptionService
             throw new HttpResponseException(
                 response()->json([
                     'success' => false,
-                    'message' => 'Workspace billing is not configured yet.',
+                    'message' => 'Workspace billing has not been configured yet. Please contact the platform administrator.',
                     'data' => null,
                     'errors' => [
-                        'workspace' => ['Workspace billing is not configured yet.'],
+                        'workspace' => ['Workspace billing has not been configured yet. Please contact the platform administrator.'],
                     ],
                 ], 422)
             );
@@ -560,8 +579,7 @@ class SubscriptionService
     ): Collection {
         return $this->runInTenantContext($tenant, function () use ($tenant, $billingProfile, $date) {
             $activeProfile = $billingProfile
-                ?? $this->currentSubscription($tenant)?->billingProfile
-                ?? $this->resolveWorkspaceBillingProfile($tenant);
+                ?? $this->resolveSubscriptionBillingProfile($tenant, $this->currentSubscription($tenant));
             $rules = $activeProfile
                 ? $this->billingProfileService->activeRulesForDate($activeProfile, $date)
                 : collect();
@@ -570,16 +588,15 @@ class SubscriptionService
                 ->orderBy('properties.name')
                 ->get()
                 ->map(function (Property $property) use ($rules, $activeProfile) {
-                    $rule = $activeProfile
-                        ? $this->billingProfileService->matchingRuleFromCollection($rules, (int) $property->registered_units)
-                        : null;
+                    $this->decoratePropertyUsageRow($property, $activeProfile, $rules);
 
                     return [
                         'property_uuid' => $property->uuid,
                         'name' => $property->name,
                         'status' => $property->status,
                         'registered_units' => (int) $property->registered_units,
-                        'estimated_price_cents' => (int) ($rule?->price_cents ?? 0),
+                        'estimated_price_cents' => (int) $property->estimated_price_cents,
+                        'matched_rule' => $property->matched_rule,
                     ];
                 })
                 ->values();
@@ -596,13 +613,13 @@ class SubscriptionService
 
         if (!empty($billingProfileUuid)) {
             return BillingProfile::query()
-                ->select(['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'])
+                ->select(self::BILLING_PROFILE_COLUMNS)
                 ->where('uuid', $billingProfileUuid)
                 ->first();
         }
 
         return BillingProfile::query()
-            ->select(['id', 'uuid', 'name', 'billing_interval', 'trial_days', 'grace_days', 'currency', 'status'])
+            ->select(self::BILLING_PROFILE_COLUMNS)
             ->where('status', 'active')
             ->where('is_default', true)
             ->first();
@@ -617,7 +634,7 @@ class SubscriptionService
         if (!$subscription) {
             return [
                 'status' => 'unconfigured',
-                'message' => 'Workspace billing is not configured yet.',
+                'message' => 'Workspace billing has not been configured yet. Please contact the platform administrator.',
                 'period_starts_at' => null,
                 'period_ends_at' => null,
                 'trial_expired_at' => null,
@@ -639,7 +656,7 @@ class SubscriptionService
             $effectiveStatus = 'past_due';
             $trialExpiredAt = $subscription->trial_ends_at;
             $expiresAt = $subscription->trial_ends_at;
-            $message = 'The trial period ended on '.$subscription->trial_ends_at->format('Y-m-d H:i:s').'. Payment is required to continue.';
+            $message = 'Your workspace trial ended on '.$subscription->trial_ends_at->format('Y-m-d H:i:s').'. A paid subscription is required to continue.';
             $isCurrentPeriodActive = false;
         } elseif ($subscription->status === 'active' && $subscription->ends_at?->lt($now)) {
             $effectiveStatus = 'past_due';
@@ -713,6 +730,69 @@ class SubscriptionService
     }
 
     /**
+     * Resolve the billing profile attached to the current subscription, falling back to workspace default configuration.
+     */
+    private function resolveSubscriptionBillingProfile(Tenant $tenant, ?Subscription $subscription): ?BillingProfile
+    {
+        return $subscription?->billingProfile ?? $this->resolveWorkspaceBillingProfile($tenant);
+    }
+
+    /**
+     * Load property subscription records for the current paginator page with only the fields needed for status rendering.
+     */
+    private function workspacePropertySubscriptionMap(int $tenantId, Collection $propertyUuids): Collection
+    {
+        $uuids = $propertyUuids
+            ->filter(fn ($uuid) => filled($uuid))
+            ->values()
+            ->all();
+
+        if ($uuids === []) {
+            return collect();
+        }
+
+        return WorkspaceProperty::query()
+            ->select(['id', 'tenant_id', 'property_uuid'])
+            ->with([
+                'subscription:id,workspace_property_id,status,current_period_starts_on,current_period_ends_on,expired_on',
+            ])
+            ->where('tenant_id', $tenantId)
+            ->whereIn('property_uuid', $uuids)
+            ->get()
+            ->keyBy('property_uuid');
+    }
+
+    /**
+     * Attach computed pricing and subscription attributes so list and snapshot responses stay consistent.
+     */
+    private function decoratePropertyUsageRow(
+        Property $property,
+        ?BillingProfile $billingProfile,
+        Collection $rules,
+        ?WorkspaceProperty $workspaceProperty = null
+    ): void {
+        $rule = $billingProfile
+            ? $this->billingProfileService->matchingRuleFromCollection($rules, (int) $property->registered_units)
+            : null;
+        $propertySubscription = $workspaceProperty?->subscription;
+
+        $property->setAttribute('matched_rule', $rule ? [
+            'uuid' => $rule->uuid,
+            'range_start' => $rule->range_start,
+            'range_end' => $rule->range_end,
+            'price_cents' => $rule->price_cents,
+            'currency' => $rule->currency,
+            'effective_from' => $rule->effective_from?->toDateString(),
+            'effective_to' => $rule->effective_to?->toDateString(),
+        ] : null);
+        $property->setAttribute('estimated_price_cents', (int) ($rule?->price_cents ?? 0));
+        $property->setAttribute(
+            'subscription_status',
+            $propertySubscription?->effectiveStatus() ?? PropertySubscription::STATUS_UNSUBSCRIBED
+        );
+    }
+
+    /**
      * Apply property breakdown sort.
      */
     private function applyPropertyBreakdownSort(Builder $query, ?string $sort): void
@@ -753,7 +833,7 @@ class SubscriptionService
         if ($tenant->status === 'suspended') {
             return [
                 'state' => 'suspended',
-                'message' => 'This workspace is currently suspended.',
+                'message' => 'This workspace is suspended. Contact the platform administrator to restore access.',
                 'inventory_changes_allowed' => false,
             ];
         }
@@ -761,7 +841,7 @@ class SubscriptionService
         if ($tenant->provisioning_status !== 'ready') {
             return [
                 'state' => 'provisioning',
-                'message' => 'This workspace is still being prepared.',
+                'message' => 'This workspace setup is not complete yet. Please try again shortly.',
                 'inventory_changes_allowed' => false,
             ];
         }
@@ -769,7 +849,7 @@ class SubscriptionService
         if ($subscriptionState['status'] === 'unconfigured') {
             return [
                 'state' => 'unconfigured',
-                'message' => 'Workspace billing is not configured yet.',
+                'message' => 'Workspace billing has not been configured yet. Please contact the platform administrator.',
                 'inventory_changes_allowed' => false,
             ];
         }

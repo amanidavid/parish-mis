@@ -77,22 +77,22 @@ class UpdateCustomerContractRequest extends FormRequest
         $today = Carbon::today()->toDateString();
 
         if ($status === 'draft' && $startDate < $today) {
-            $validator->errors()->add('status', 'Draft contracts can only use today or a future start date.');
+            $validator->errors()->add('start_date', 'Draft contracts can only start today or on a future date.');
         }
 
         if ($status === 'active' && $endDate !== null && $endDate < $today) {
-            $validator->errors()->add('status', 'Active contracts cannot have an end date in the past. Use expired or terminated instead.');
+            $validator->errors()->add('end_date', 'Active contracts cannot use a past end date. Change the status to expired or terminated instead.');
         }
 
         if ($status === 'expired') {
             if ($endDate === null) {
-                $validator->errors()->add('status', 'Expired contracts must have an end date.');
+                $validator->errors()->add('end_date', 'Expired contracts must have an end date before today.');
 
                 return;
             }
 
             if ($endDate >= $today) {
-                $validator->errors()->add('status', 'Expired contracts must have an end date before today.');
+                $validator->errors()->add('end_date', 'Expired contracts must use an end date before today.');
             }
         }
     }

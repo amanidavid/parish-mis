@@ -89,14 +89,16 @@ class PropertySubAlertService
     private function processSubscriptions(Tenant $tenant, $query, string $eventType): int
     {
         $sentAlerts = 0;
+        $timestamp = now();
 
         $query->orderBy('property_subscriptions.id')
-            ->chunkById(100, function ($subscriptions) use (&$sentAlerts, $tenant, $eventType) {
+            ->chunkById(100, function ($subscriptions) use (&$sentAlerts, $tenant, $eventType, $timestamp) {
                 $propertyIdMap = $this->tenantPropertyIdMap($tenant, $subscriptions->pluck('property_uuid')->all());
                 $tenantPropertyIds = collect($propertyIdMap)
                     ->filter()
                     ->values()
                     ->all();
+                $enabledChannels = $this->enabledChannels();
                 $staffRecipients = $this->recipientResolver->resolveForPropertiesWithPermissions(
                     $tenantPropertyIds,
                     (array) config('property_subscription_alerts.staff_permissions', [])
@@ -112,8 +114,10 @@ class PropertySubAlertService
                         continue;
                     }
 
+                    [$subject, $message] = $this->buildMessage($subscription, $eventType);
+
                     foreach (($staffRecipients[(int) $tenantPropertyId] ?? []) as $recipient) {
-                        foreach ($this->enabledChannels() as $channel) {
+                        foreach ($enabledChannels as $channel) {
                             $address = $channel === 'sms'
                                 ? trim((string) ($recipient['phone'] ?? ''))
                                 : trim((string) ($recipient['email'] ?? ''));
@@ -134,7 +138,6 @@ class PropertySubAlertService
                                 continue;
                             }
 
-                            [$subject, $message] = $this->buildMessage($subscription, $eventType);
                             $status = 'success';
                             $error = null;
 
@@ -146,8 +149,12 @@ class PropertySubAlertService
                                 $error = $exception->getMessage();
                             }
 
-                            $this->upsertLog($tenant, $subscription, $recipient, $channel, $eventType, $address, $status, $error);
-                            $existingLogs[$logKey] = ['status' => $status];
+                            $existingUuid = $existingLogs[$logKey]['uuid'] ?? null;
+                            $this->upsertLog($tenant, $subscription, $recipient, $channel, $eventType, $address, $status, $error, $timestamp, $existingUuid);
+                            $existingLogs[$logKey] = [
+                                'uuid' => $existingUuid,
+                                'status' => $status,
+                            ];
                         }
                     }
                 }
@@ -164,7 +171,7 @@ class PropertySubAlertService
 
         return $this->baseSubscriptionQuery($tenant)
             ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
-            ->whereDate('property_subscriptions.current_period_ends_on', '=', $targetDate);
+            ->where('property_subscriptions.current_period_ends_on', '=', $targetDate);
     }
 
     private function expiresTodaySubscriptionsQuery(Tenant $tenant)
@@ -173,7 +180,7 @@ class PropertySubAlertService
 
         return $this->baseSubscriptionQuery($tenant)
             ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
-            ->whereDate('property_subscriptions.current_period_ends_on', '=', $today);
+            ->where('property_subscriptions.current_period_ends_on', '=', $today);
     }
 
     private function baseSubscriptionQuery(Tenant $tenant)
@@ -278,6 +285,7 @@ class PropertySubAlertService
                 $log->channel,
                 $log->recipient_key
             )] = [
+                'uuid' => $log->uuid,
                 'status' => $log->status,
             ];
         }
@@ -293,17 +301,10 @@ class PropertySubAlertService
         string $eventType,
         string $address,
         string $status,
-        ?string $error
+        ?string $error,
+        Carbon $timestamp,
+        ?string $existingUuid = null
     ): void {
-        $existingUuid = DB::connection('base')->table('property_subscription_alert_logs')
-            ->where('tenant_id', $tenant->id)
-            ->where('property_subscription_id', $subscription->subscription_id)
-            ->where('event_type', $eventType)
-            ->where('channel', $channel)
-            ->where('recipient_key', $recipient['recipient_key'])
-            ->whereDate('period_ends_on', $subscription->current_period_ends_on)
-            ->value('uuid');
-
         DB::connection('base')->table('property_subscription_alert_logs')->updateOrInsert(
             [
                 'tenant_id' => $tenant->id,
@@ -323,9 +324,8 @@ class PropertySubAlertService
                 'recipient_address' => $address,
                 'status' => $status,
                 'message' => $error,
-                'sent_at' => now(),
-                'updated_at' => now(),
-                'created_at' => now(),
+                'sent_at' => $timestamp,
+                'updated_at' => $timestamp,
             ]
         );
     }

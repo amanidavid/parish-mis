@@ -27,7 +27,7 @@ class DashboardController extends Controller
         return ApiResponse::success('Platform overview retrieved successfully.', [
             'summary' => $overview['summary'],
             'workspaces' => $overview['workspaces'],
-            'billing_profiles' => $overview['billing_profiles'],
+            'billing_rules' => $overview['billing_rules'],
             'recent_workspaces' => PlatformOverviewWorkspaceResource::collection($overview['recent_workspaces'])->resolve(),
             'generated_at' => $overview['generated_at'],
         ]);

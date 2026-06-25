@@ -14,21 +14,28 @@ use Illuminate\Support\Str;
 
 class StaffProvisioningService
 {
+    private const DEFAULT_ROLE = 'manager';
+    private const DEFAULT_STATUS = 'active';
+
     /**
      * Create tenant staff.
      */
     public function createTenantStaff(Tenant $tenant, array $data): array
     {
+        $this->assertTenantReady($tenant);
+
         $password = $data['password'] ?? $this->generateTemporaryPassword();
         $username = $this->resolveUniqueUsername($data['username'] ?? null, $data['name']);
-        $roles = $this->resolveRoleNames($data['roles'] ?? ['manager']);
+        $roles = $this->resolveRoleNames($data['roles'] ?? [self::DEFAULT_ROLE]);
+        $status = $data['status'] ?? self::DEFAULT_STATUS;
 
         $this->guardAgainstWorkspaceStaffConflicts($data['phone'], $data['email'] ?? null);
+        $this->guardAgainstBaseUserConflicts($data['phone'], $data['email'] ?? null, $username);
 
         $baseUser = null;
 
         try {
-            $baseUser = DB::connection('base')->transaction(function () use ($tenant, $data, $password, $username) {
+            $baseUser = DB::connection('base')->transaction(function () use ($tenant, $data, $password, $username, $status) {
                 $baseUser = BaseUser::query()->create([
                     'uuid' => (string) Str::uuid(),
                     'username' => $username,
@@ -36,7 +43,7 @@ class StaffProvisioningService
                     'phone' => $data['phone'],
                     'email' => $data['email'] ?? null,
                     'password' => Hash::make($password),
-                    'status' => $data['status'] ?? 'active',
+                    'status' => $status,
                     'meta' => [
                         'credential_delivery_channel' => 'log',
                         'password_generated_by_landlord' => !isset($data['password']),
@@ -53,14 +60,14 @@ class StaffProvisioningService
                 return $baseUser;
             });
 
-            $tenantUser = DB::transaction(function () use ($baseUser, $data, $roles) {
+            $tenantUser = DB::transaction(function () use ($baseUser, $data, $roles, $status) {
                 $tenantUser = TenantUser::query()->create([
                     'uuid' => (string) Str::uuid(),
                     'base_user_id' => $baseUser->id,
                     'name' => trim($data['name']),
                     'email' => $data['email'] ?? null,
                     'phone' => $data['phone'],
-                    'status' => $data['status'] ?? 'active',
+                    'status' => $status,
                 ]);
 
                 $tenantUser->syncRoles($roles);
@@ -111,7 +118,7 @@ class StaffProvisioningService
             ->values()
             ->all();
 
-        $normalized = $normalized === [] ? ['manager'] : $normalized;
+        $normalized = $normalized === [] ? [self::DEFAULT_ROLE] : $normalized;
         if (in_array('owner', $normalized, true)) {
             throw new \InvalidArgumentException('Owner role cannot be assigned through staff provisioning.');
         }
@@ -138,6 +145,34 @@ class StaffProvisioningService
 
         if ($query->exists()) {
             throw new \InvalidArgumentException('A staff account with the same phone or email already exists in this workspace.');
+        }
+    }
+
+    /**
+     * Guard against global base-user conflicts before the landlord insert is attempted.
+     */
+    private function guardAgainstBaseUserConflicts(string $phone, ?string $email, string $username): void
+    {
+        if (BaseUser::query()->where('username', $username)->exists()) {
+            throw new \InvalidArgumentException('The selected username is already in use.');
+        }
+
+        if (BaseUser::query()->where('phone', $phone)->exists()) {
+            throw new \InvalidArgumentException('The selected phone number is already linked to another account.');
+        }
+
+        if (!empty($email) && BaseUser::query()->where('email', $email)->exists()) {
+            throw new \InvalidArgumentException('The selected email address is already linked to another account.');
+        }
+    }
+
+    /**
+     * Allow staff provisioning only after the workspace tenant database is ready.
+     */
+    private function assertTenantReady(Tenant $tenant): void
+    {
+        if ($tenant->provisioning_status !== 'ready' || empty($tenant->database)) {
+            throw new \InvalidArgumentException('This workspace is not ready for staff provisioning yet.');
         }
     }
 

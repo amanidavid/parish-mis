@@ -14,6 +14,12 @@ use InvalidArgumentException;
 
 class WorkspacePropertyRegistryService
 {
+    private const WORKSPACE_PROPERTY_RELATIONS = [
+        'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
+        'subscription.latestPayment',
+        'latestPayment',
+    ];
+
     /**
      * Create a new instance.
      */
@@ -73,13 +79,7 @@ class WorkspacePropertyRegistryService
      */
     public function resolveWorkspaceProperty(Tenant $tenant, string $propertyUuid): ?WorkspaceProperty
     {
-        $workspaceProperty = WorkspaceProperty::query()
-            ->with([
-                'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
-                'subscription.latestPayment',
-                'latestPayment',
-            ])
-            ->where('tenant_id', $tenant->id)
+        $workspaceProperty = $this->workspacePropertyQuery($tenant)
             ->where('property_uuid', $propertyUuid)
             ->first();
 
@@ -95,13 +95,7 @@ class WorkspacePropertyRegistryService
      */
     public function resolveWorkspacePropertyForModel(Tenant $tenant, Property $property): ?WorkspaceProperty
     {
-        $workspaceProperty = WorkspaceProperty::query()
-            ->with([
-                'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
-                'subscription.latestPayment',
-                'latestPayment',
-            ])
-            ->where('tenant_id', $tenant->id)
+        $workspaceProperty = $this->workspacePropertyQuery($tenant)
             ->where('property_uuid', $property->uuid)
             ->first();
 
@@ -229,7 +223,7 @@ class WorkspacePropertyRegistryService
             'updated_at' => $now,
         ])->all();
 
-        DB::connection('base')->transaction(function () use ($payload, $tenant) {
+        DB::connection('base')->transaction(function () use ($payload, $tenant, $now) {
             WorkspaceProperty::query()->upsert(
                 $payload,
                 ['tenant_id', 'property_uuid'],
@@ -248,30 +242,36 @@ class WorkspacePropertyRegistryService
             $workspaceProperties = WorkspaceProperty::query()
                 ->where('tenant_id', $tenant->id)
                 ->whereIn('property_uuid', array_column($payload, 'property_uuid'))
-                ->get(['id', 'tenant_id']);
+                ->get(['id', 'tenant_id', 'property_uuid']);
 
             $subscriptionPayload = $workspaceProperties->map(fn (WorkspaceProperty $workspaceProperty) => [
+                'uuid' => (string) str()->uuid(),
                 'tenant_id' => $workspaceProperty->tenant_id,
                 'workspace_property_id' => $workspaceProperty->id,
                 'status' => PropertySubscription::STATUS_UNSUBSCRIBED,
-                'created_at' => now(),
-                'updated_at' => now(),
-                'uuid' => (string) str()->uuid(),
+                'created_at' => $now,
+                'updated_at' => $now,
             ])->all();
 
-            PropertySubscription::query()->insertOrIgnore($subscriptionPayload);
+            if ($subscriptionPayload !== []) {
+                PropertySubscription::query()->insertOrIgnore($subscriptionPayload);
+            }
         });
 
-        return WorkspaceProperty::query()
-            ->with([
-                'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
-                'subscription.latestPayment',
-                'latestPayment',
-            ])
-            ->where('tenant_id', $tenant->id)
+        return $this->workspacePropertyQuery($tenant)
             ->whereIn('property_uuid', array_column($payload, 'property_uuid'))
             ->orderBy('property_name')
             ->get();
+    }
+
+    /**
+     * Shared landlord-side workspace property query used by resolve and sync flows.
+     */
+    private function workspacePropertyQuery(Tenant $tenant)
+    {
+        return WorkspaceProperty::query()
+            ->with(self::WORKSPACE_PROPERTY_RELATIONS)
+            ->where('tenant_id', $tenant->id);
     }
 
     /**
@@ -295,7 +295,7 @@ class WorkspacePropertyRegistryService
     private function assertTenantReady(Tenant $tenant): void
     {
         if ($tenant->provisioning_status !== 'ready' || empty($tenant->database)) {
-            throw new InvalidArgumentException('This workspace is not provisioned yet, so property subscriptions cannot be managed.');
+            throw new InvalidArgumentException('Property subscriptions cannot be managed yet because workspace setup is not complete.');
         }
     }
 

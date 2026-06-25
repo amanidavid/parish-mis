@@ -14,6 +14,10 @@ use Traversable;
 
 class PropertySubscriptionAccessService
 {
+    private const PROPERTY_SNAPSHOT_RELATIONS = [
+        'subscription:id,workspace_property_id,status,current_period_starts_on,current_period_ends_on,expired_on',
+    ];
+
     /**
      * Create a new instance.
      */
@@ -42,7 +46,7 @@ class PropertySubscriptionAccessService
 
         if (!$subscription || $subscription->effectiveStatus() !== PropertySubscription::STATUS_ACTIVE) {
             throw new InvalidArgumentException(sprintf(
-                'The selected property does not have an active subscription. Record a property payment before continuing with %s.',
+                'This property is not paid for right now. Record a property payment before continuing with %s.',
                 $moduleName
             ));
         }
@@ -62,7 +66,7 @@ class PropertySubscriptionAccessService
         $propertySubscriptionAccess = [
             'allowed' => false,
             'reason_code' => 'property_subscription_required',
-            'message' => 'Property subscription access is required.',
+            'message' => 'This property is not paid for right now. Renew or activate the property subscription to continue.',
             'subscription_status' => $subscriptionStatus,
             'payment_required_now' => true,
             'trial_ends_on' => $trialEndsOn?->toDateString(),
@@ -104,19 +108,13 @@ class PropertySubscriptionAccessService
             $propertySubscriptionAccess = [
                 ...$propertySubscriptionAccess,
                 'reason_code' => 'property_subscription_expired',
-                'message' => 'Property subscription access is required. The current property subscription has expired.',
+                'message' => 'This property subscription has expired. Renew the subscription to continue working on this property.',
             ];
         }
 
         $operationsAllowed = (bool) ($workspaceAccess['inventory_changes_allowed'] ?? false)
             && (bool) ($propertySubscriptionAccess['allowed'] ?? false);
-
-        $operationsReasonCode = $workspaceAccess['inventory_changes_allowed'] ?? false
-            ? ($propertySubscriptionAccess['reason_code'] ?? null)
-            : 'workspace_access_required';
-        $operationsMessage = $workspaceAccess['inventory_changes_allowed'] ?? false
-            ? ($propertySubscriptionAccess['message'] ?? null)
-            : ($workspaceAccess['message'] ?? 'Workspace access is restricted at the moment.');
+        $operations = $this->buildOperationsPayload($workspaceAccess, $propertySubscriptionAccess, $operationsAllowed);
 
         return [
             'workspace' => [
@@ -125,11 +123,7 @@ class PropertySubscriptionAccessService
                 'inventory_changes_allowed' => (bool) ($workspaceAccess['inventory_changes_allowed'] ?? false),
             ],
             'property_subscription' => $propertySubscriptionAccess,
-            'operations' => [
-                'allowed' => $operationsAllowed,
-                'reason_code' => $operationsReasonCode,
-                'message' => $operationsMessage,
-            ],
+            'operations' => $operations,
         ];
     }
 
@@ -161,15 +155,7 @@ class PropertySubscriptionAccessService
             ->filter()
             ->values()
             ->all();
-
-        $workspaceProperties = WorkspaceProperty::query()
-            ->with([
-                'subscription:id,workspace_property_id,status,current_period_ends_on,expired_on',
-            ])
-            ->where('tenant_id', $tenant->id)
-            ->whereIn('property_uuid', $propertyUuids)
-            ->get()
-            ->keyBy('property_uuid');
+        $workspaceProperties = $this->workspacePropertySnapshotMap($tenant, $propertyUuids);
 
         return collect($propertyItems)
             ->mapWithKeys(function (Property $property) use ($workspaceAccess, $trialEndsOn, $workspaceProperties) {
@@ -185,12 +171,7 @@ class PropertySubscriptionAccessService
                 );
                 $operationsAllowed = (bool) ($workspaceAccess['inventory_changes_allowed'] ?? false)
                     && (bool) ($propertyAccess['allowed'] ?? false);
-                $operationsReasonCode = $workspaceAccess['inventory_changes_allowed'] ?? false
-                    ? ($propertyAccess['reason_code'] ?? null)
-                    : 'workspace_access_required';
-                $operationsMessage = $workspaceAccess['inventory_changes_allowed'] ?? false
-                    ? ($propertyAccess['message'] ?? null)
-                    : ($workspaceAccess['message'] ?? 'Workspace access is restricted at the moment.');
+                $operations = $this->buildOperationsPayload($workspaceAccess, $propertyAccess, $operationsAllowed);
 
                 return [
                     $property->uuid => [
@@ -199,9 +180,9 @@ class PropertySubscriptionAccessService
                         'subscription_message' => $propertyAccess['message'] ?? null,
                         'subscription_reason_code' => $propertyAccess['reason_code'] ?? null,
                         'payment_required_now' => (bool) ($propertyAccess['payment_required_now'] ?? false),
-                        'operations_allowed' => $operationsAllowed,
-                        'operations_message' => $operationsMessage,
-                        'operations_reason_code' => $operationsReasonCode,
+                        'operations_allowed' => (bool) ($operations['allowed'] ?? false),
+                        'operations_message' => $operations['message'] ?? null,
+                        'operations_reason_code' => $operations['reason_code'] ?? null,
                         'current_period_ends_on' => $propertyAccess['current_period_ends_on'] ?? null,
                         'expired_on' => $propertyAccess['expired_on'] ?? null,
                     ],
@@ -223,15 +204,8 @@ class PropertySubscriptionAccessService
             return;
         }
 
-        if (!$workspaceProperty || !$subscription || $subscription->effectiveStatus($contractStartDate) !== PropertySubscription::STATUS_ACTIVE) {
-            throw new InvalidArgumentException('The selected property subscription does not cover the requested contract start date.');
-        }
-
-        $startsOn = $subscription->current_period_starts_on ? Carbon::parse($subscription->current_period_starts_on)->startOfDay() : null;
-        $endsOn = $subscription->current_period_ends_on ? Carbon::parse($subscription->current_period_ends_on)->startOfDay() : null;
-
-        if (($startsOn && $targetDate->lt($startsOn)) || ($endsOn && $targetDate->gt($endsOn))) {
-            throw new InvalidArgumentException('The requested contract start date falls outside the active property subscription coverage period.');
+        if (!$workspaceProperty || !$subscription || !$subscription->coversDate($targetDate)) {
+            throw new InvalidArgumentException('The selected contract start date is not paid for. There is no active workspace trial or paid property subscription covering that date.');
         }
     }
 
@@ -268,6 +242,42 @@ class PropertySubscriptionAccessService
     }
 
     /**
+     * Load only the fields needed to build property subscription access snapshots.
+     */
+    private function workspacePropertySnapshotMap(Tenant $tenant, array $propertyUuids): \Illuminate\Support\Collection
+    {
+        if ($propertyUuids === []) {
+            return collect();
+        }
+
+        return WorkspaceProperty::query()
+            ->select(['id', 'tenant_id', 'property_uuid', 'property_deleted_at'])
+            ->with(self::PROPERTY_SNAPSHOT_RELATIONS)
+            ->where('tenant_id', $tenant->id)
+            ->whereIn('property_uuid', $propertyUuids)
+            ->get()
+            ->keyBy('property_uuid');
+    }
+
+    /**
+     * Build operations payload using workspace-level and property-level access results.
+     */
+    private function buildOperationsPayload(array $workspaceAccess, array $propertyAccess, bool $allowed): array
+    {
+        $workspaceAllowsInventoryChanges = (bool) ($workspaceAccess['inventory_changes_allowed'] ?? false);
+
+        return [
+            'allowed' => $allowed,
+            'reason_code' => $workspaceAllowsInventoryChanges
+                ? ($propertyAccess['reason_code'] ?? null)
+                : 'workspace_access_required',
+            'message' => $workspaceAllowsInventoryChanges
+                ? ($propertyAccess['message'] ?? null)
+                : ($workspaceAccess['message'] ?? 'Workspace access is restricted at the moment.'),
+        ];
+    }
+
+    /**
      * Build property subscription access payload.
      */
     private function buildPropertySubscriptionAccessPayload(
@@ -279,7 +289,7 @@ class PropertySubscriptionAccessService
         $payload = [
             'allowed' => false,
             'reason_code' => 'property_subscription_required',
-            'message' => 'Property subscription access is required.',
+            'message' => 'This property is not paid for right now. Renew or activate the property subscription to continue.',
             'subscription_status' => $subscriptionStatus,
             'payment_required_now' => true,
             'trial_ends_on' => $trialEndsOn?->toDateString(),
@@ -327,7 +337,7 @@ class PropertySubscriptionAccessService
             return [
                 ...$payload,
                 'reason_code' => 'property_subscription_expired',
-                'message' => 'Property subscription access is required. The current property subscription has expired.',
+                'message' => 'This property subscription has expired. Renew the subscription to continue working on this property.',
             ];
         }
 

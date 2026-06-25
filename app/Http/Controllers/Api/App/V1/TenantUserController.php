@@ -295,6 +295,18 @@ class TenantUserController extends Controller
             'A staff account with the same phone or email already exists in this workspace.' => [
                 'staff' => ['A staff account with the same phone or email already exists in this workspace.'],
             ],
+            'The selected username is already in use.' => [
+                'username' => ['The selected username is already in use.'],
+            ],
+            'The selected phone number is already linked to another account.' => [
+                'phone' => ['The selected phone number is already linked to another account.'],
+            ],
+            'The selected email address is already linked to another account.' => [
+                'email' => ['The selected email address is already linked to another account.'],
+            ],
+            'This workspace is not ready for staff provisioning yet.' => [
+                'workspace' => ['This workspace is not ready for staff provisioning yet.'],
+            ],
             default => [
                 'staff' => ['Please review the submitted staff details and try again.'],
             ],

@@ -11,6 +11,9 @@ class Customer extends BaseModel
 {
     protected $table = 'customers';
 
+    public const STATUS_ACTIVE = 'active';
+    public const STATUS_INACTIVE = 'inactive';
+
     public function property(): BelongsTo
     {
         return $this->belongsTo(Property::class);

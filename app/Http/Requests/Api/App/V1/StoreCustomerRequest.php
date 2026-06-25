@@ -20,7 +20,7 @@ class StoreCustomerRequest extends FormRequest
             'display_name' => ['required', 'string', 'min:2', 'max:150'],
             'email' => ['nullable', 'email:rfc,dns', 'max:150'],
             'phone' => ['nullable', 'string', 'max:30'],
-            'status' => ['nullable', 'in:active,inactive'],
+            'status' => ['prohibited'],
             'notes' => ['nullable', 'string'],
             'business_details' => ['nullable', 'array'],
             'business_details.business_name' => [
@@ -34,6 +34,13 @@ class StoreCustomerRequest extends FormRequest
             'business_details.contact_person_name' => ['nullable', 'string', 'max:150'],
             'business_details.contact_person_phone' => ['nullable', 'string', 'max:30'],
             'business_details.address_line' => ['nullable', 'string', 'max:255'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'status.prohibited' => 'Customer status is set automatically from active contracts and cannot be entered manually.',
         ];
     }
 }

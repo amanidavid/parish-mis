@@ -6,6 +6,9 @@ use Illuminate\Support\Facades\DB;
 
 class PropertyMetricsService
 {
+    private const UNIT_STATUS_OCCUPIED = 'occupied';
+    private const UNIT_STATUS_VACANT = 'vacant';
+    private const UNIT_STATUS_MAINTENANCE = 'maintenance';
     private const CONTRACT_STATUSES = [
         'draft',
         'active',
@@ -18,19 +21,39 @@ class PropertyMetricsService
      */
     public function forProperty(int $propertyId): array
     {
-        $row = DB::connection($this->tenantConnectionName())
+        $connection = DB::connection($this->tenantConnectionName());
+
+        $unitMetrics = $connection
             ->table('property_floors')
             ->leftJoin('units', 'units.property_floor_id', '=', 'property_floors.id')
+            ->where('property_floors.property_id', $propertyId)
+            ->selectRaw('COUNT(CASE WHEN units.status = ? THEN 1 END) as occupied_count', [self::UNIT_STATUS_OCCUPIED])
+            ->selectRaw('COUNT(CASE WHEN units.status = ? THEN 1 END) as vacant_count', [self::UNIT_STATUS_VACANT])
+            ->selectRaw('COUNT(CASE WHEN units.status = ? THEN 1 END) as maintenance_count', [self::UNIT_STATUS_MAINTENANCE]);
+
+        $contractMetrics = $connection
+            ->table('property_floors')
+            ->join('units', 'units.property_floor_id', '=', 'property_floors.id')
             ->leftJoin('customer_contracts', 'customer_contracts.unit_id', '=', 'units.id')
             ->where('property_floors.property_id', $propertyId)
-            ->selectRaw("COUNT(DISTINCT CASE WHEN units.status = 'occupied' THEN units.id END) as occupied_count")
-            ->selectRaw("COUNT(DISTINCT CASE WHEN units.status = 'vacant' THEN units.id END) as vacant_count")
-            ->selectRaw("COUNT(DISTINCT CASE WHEN units.status = 'maintenance' THEN units.id END) as maintenance_count")
             ->selectRaw('COUNT(customer_contracts.id) as contracts_count')
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'draft' THEN 1 ELSE 0 END) as draft_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'active' THEN 1 ELSE 0 END) as active_contracts_count")
             ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'expired' THEN 1 ELSE 0 END) as expired_contracts_count")
-            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts_count")
+            ->selectRaw("SUM(CASE WHEN customer_contracts.status = 'terminated' THEN 1 ELSE 0 END) as terminated_contracts_count");
+
+        $row = $connection
+            ->query()
+            ->fromSub($unitMetrics, 'unit_metrics')
+            ->crossJoinSub($contractMetrics, 'contract_metrics')
+            ->selectRaw('COALESCE(unit_metrics.occupied_count, 0) as occupied_count')
+            ->selectRaw('COALESCE(unit_metrics.vacant_count, 0) as vacant_count')
+            ->selectRaw('COALESCE(unit_metrics.maintenance_count, 0) as maintenance_count')
+            ->selectRaw('COALESCE(contract_metrics.contracts_count, 0) as contracts_count')
+            ->selectRaw('COALESCE(contract_metrics.draft_contracts_count, 0) as draft_contracts_count')
+            ->selectRaw('COALESCE(contract_metrics.active_contracts_count, 0) as active_contracts_count')
+            ->selectRaw('COALESCE(contract_metrics.expired_contracts_count, 0) as expired_contracts_count')
+            ->selectRaw('COALESCE(contract_metrics.terminated_contracts_count, 0) as terminated_contracts_count')
             ->first();
 
         $contractStatuses = [];

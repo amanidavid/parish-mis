@@ -20,7 +20,7 @@ class UpdateCustomerRequest extends FormRequest
             'display_name' => ['sometimes', 'string', 'min:2', 'max:150'],
             'email' => ['sometimes', 'nullable', 'email:rfc,dns', 'max:150'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:30'],
-            'status' => ['sometimes', 'in:active,inactive'],
+            'status' => ['prohibited'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'business_details' => ['sometimes', 'nullable', 'array'],
             'business_details.business_name' => [
@@ -34,6 +34,13 @@ class UpdateCustomerRequest extends FormRequest
             'business_details.contact_person_name' => ['sometimes', 'nullable', 'string', 'max:150'],
             'business_details.contact_person_phone' => ['sometimes', 'nullable', 'string', 'max:30'],
             'business_details.address_line' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ];
+    }
+
+    public function messages(): array
+    {
+        return [
+            'status.prohibited' => 'Customer status is set automatically from active contracts and cannot be changed manually.',
         ];
     }
 }
