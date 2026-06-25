@@ -200,7 +200,7 @@ class PropertySubscriptionAccessService
         $subscription = $workspaceProperty?->subscription;
         $targetDate = Carbon::parse($contractStartDate)->startOfDay();
 
-        if ($this->workspaceTrialCoversDate($tenant, $targetDate)) {
+        if ($this->activeWorkspaceTrialEndsOn($tenant) !== null) {
             return;
         }
 

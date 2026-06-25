@@ -99,6 +99,18 @@ class CustomerContractController extends Controller
             $query->where('contract_number', 'like', $filters['contract_number'] . '%');
         }
 
+        if (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null)) {
+            $startDate = $filters['start_date'] ?? $filters['end_date'];
+            $endDate = $filters['end_date'] ?? $filters['start_date'];
+
+            $query->where('start_date', '<=', $endDate)
+                ->where(function ($innerQuery) use ($startDate) {
+                    $innerQuery
+                        ->whereNull('end_date')
+                        ->orWhere('end_date', '>=', $startDate);
+                });
+        }
+
         $this->applySort($query, $filters['sort'] ?? null, ['start_date', 'contract_number', 'created_at'], 'start_date', 'desc');
         $contracts = $query->paginate((int) ($filters['per_page'] ?? 15));
 
