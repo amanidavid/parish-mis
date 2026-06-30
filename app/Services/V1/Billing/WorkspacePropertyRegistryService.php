@@ -15,7 +15,7 @@ use InvalidArgumentException;
 class WorkspacePropertyRegistryService
 {
     private const WORKSPACE_PROPERTY_RELATIONS = [
-        'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
+        'subscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
         'subscription.latestPayment',
         'latestPayment',
     ];

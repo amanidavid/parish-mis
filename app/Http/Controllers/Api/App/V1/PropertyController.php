@@ -19,7 +19,6 @@ use App\Models\Tenant\Ward;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
 use App\Services\V1\Billing\PropertySubscriptionAccessService;
 use App\Services\V1\PropertyMetricsService;
-use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiResponse;
@@ -35,7 +34,6 @@ class PropertyController extends Controller
      */
     public function __construct(
         private SubscriptionService $subscriptionService,
-        private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertyMetricsService $propertyMetricsService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
@@ -131,7 +129,7 @@ class PropertyController extends Controller
     public function store(StorePropertyRequest $request)
     {
         $this->authorize('create', Property::class);
-        $this->preparePropertyScopedWorkspaceMutation(true);
+        $this->preparePropertyScopedWorkspaceMutation();
 
         $data = $request->validated();
         $type = null;
@@ -278,7 +276,7 @@ class PropertyController extends Controller
     public function destroy(Property $property)
     {
         $this->authorize('delete', $property);
-        $this->preparePropertyScopedWorkspaceMutation(true);
+        $this->preparePropertyScopedWorkspaceMutation();
         $this->syncWorkspacePropertyRegistry([(int) $property->id]);
 
         DB::transaction(fn () => $property->delete());
@@ -298,22 +296,18 @@ class PropertyController extends Controller
 
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->syncWorkspaceUsage($tenant);
-            $this->subscriptionUsageAdjustmentService->syncPendingAdjustment($tenant);
         }
     }
 
     /**
      * Prepare property-scoped workspace mutation.
      */
-    private function preparePropertyScopedWorkspaceMutation(bool $captureUsageBaseline = false): void
+    private function preparePropertyScopedWorkspaceMutation(): void
     {
         $tenant = request()->attributes->get('tenant');
 
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
-            if ($captureUsageBaseline) {
-                $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
-            }
         }
     }
 

@@ -16,7 +16,6 @@ class TenantPropertySubscriptionPaymentIndexRequest extends FormRequest
     {
         return [
             'property_uuid' => ['nullable', 'uuid'],
-            'billing_rule_uuid' => ['nullable', 'uuid'],
             'search' => ['nullable', 'string', 'max:120'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],

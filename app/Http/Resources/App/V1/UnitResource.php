@@ -14,6 +14,8 @@ class UnitResource extends ApiJsonResource
             'uuid' => $this->uuid,
             'unit_number' => $this->unit_number,
             'description' => $this->description,
+            'monthly_rent_amount' => (float) $this->monthly_rent_amount,
+            'rent_currency' => $this->rent_currency ?? 'TZS',
             'status' => $this->status,
             'manual_status_options' => Unit::MANUAL_STATUSES,
             'property_floor' => $this->whenLoaded('propertyFloor', fn () => [

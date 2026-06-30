@@ -13,7 +13,7 @@ use App\Http\Resources\Admin\V1\BillingProfileResource;
 use App\Http\Resources\Admin\V1\BillingRuleResource;
 use App\Models\Landlord\BillingProfile;
 use App\Models\Landlord\BillingRule;
-use App\Services\V1\BillingProfileService;
+use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Support\Facades\DB;
@@ -24,7 +24,7 @@ class BillingProfileController extends Controller
     /**
      * Create a new instance.
      */
-    public function __construct(private BillingProfileService $billingProfileService)
+    public function __construct()
     {
     }
 
@@ -186,34 +186,40 @@ class BillingProfileController extends Controller
 
     /** Add a new unit-range pricing rule to a billing profile after overlap validation. */
     /**
+     * Store rule directly under the billing-rules collection route.
+     */
+    public function storeRuleDirect(StoreBillingRuleRequest $request)
+    {
+        $data = $request->validated();
+        $billingProfile = $this->resolveBillingProfileForRule($data);
+
+        if (!empty($data['billing_profile_uuid']) && !$billingProfile) {
+            return ApiResponse::error(
+                'Billing rule could not be created.',
+                ['billing_profile_uuid' => ['The selected billing profile could not be found.']],
+                422
+            );
+        }
+
+        if (!$billingProfile) {
+            return ApiResponse::error(
+                'Billing rule could not be created.',
+                ['billing_profile_uuid' => ['No active default billing profile is configured. Create or activate a default billing profile first.']],
+                422
+            );
+        }
+
+        return $this->persistBillingRule($data, $billingProfile);
+    }
+
+    /**
      * Store rule.
      */
     public function storeRule(StoreBillingRuleRequest $request, BillingProfile $billingProfile)
     {
         $data = $request->validated();
 
-        if (($data['status'] ?? 'active') === 'active' && $this->billingProfileService->hasOverlappingRule($billingProfile, $data)) {
-            return ApiResponse::error(
-                'Billing rule could not be created.',
-                ['rule' => ['An overlapping active billing rule already exists for this range and period.']],
-                422
-            );
-        }
-
-        $rule = BillingRule::query()->create([
-            'uuid' => (string) Str::uuid(),
-            'billing_profile_id' => $billingProfile->id,
-            'range_start' => $data['range_start'],
-            'range_end' => $data['range_end'] ?? null,
-            'price_cents' => $data['price_cents'],
-            'currency' => strtoupper($data['currency'] ?? $billingProfile->currency),
-            'effective_from' => $data['effective_from'],
-            'effective_to' => $data['effective_to'] ?? null,
-            'sort_order' => $data['sort_order'] ?? 0,
-            'status' => $data['status'] ?? 'active',
-        ]);
-
-        return ApiResponse::resource(new BillingRuleResource($rule), 'Billing rule created successfully.', 201);
+        return $this->persistBillingRule($data, $billingProfile);
     }
 
     /** Update a billing rule while protecting the profile from overlapping active ranges. */
@@ -223,34 +229,26 @@ class BillingProfileController extends Controller
     public function updateRule(UpdateBillingRuleRequest $request, BillingRule $billingRule)
     {
         $data = $request->validated();
-        $payload = [
-            'range_start' => $data['range_start'] ?? $billingRule->range_start,
-            'range_end' => array_key_exists('range_end', $data) ? $data['range_end'] : $billingRule->range_end,
+
+        $billingRule->fill([
+            'unit_price_cents' => $data['unit_price_cents'] ?? $billingRule->unit_price_cents,
+            'currency' => isset($data['currency']) ? strtoupper($data['currency']) : $billingRule->currency,
             'effective_from' => $data['effective_from'] ?? $billingRule->effective_from?->toDateString(),
             'effective_to' => array_key_exists('effective_to', $data) ? $data['effective_to'] : $billingRule->effective_to?->toDateString(),
             'status' => $data['status'] ?? $billingRule->status,
-        ];
-
-        if ($payload['status'] === 'active' && $this->billingProfileService->hasOverlappingRule($billingRule->profile, $payload, $billingRule->id)) {
-            return ApiResponse::error(
-                'Billing rule could not be updated.',
-                ['rule' => ['An overlapping active billing rule already exists for this range and period.']],
-                422
-            );
-        }
-
-        $billingRule->fill([
-            'range_start' => $payload['range_start'],
-            'range_end' => $payload['range_end'],
-            'price_cents' => $data['price_cents'] ?? $billingRule->price_cents,
-            'currency' => isset($data['currency']) ? strtoupper($data['currency']) : $billingRule->currency,
-            'effective_from' => $payload['effective_from'],
-            'effective_to' => $payload['effective_to'],
-            'sort_order' => $data['sort_order'] ?? $billingRule->sort_order,
-            'status' => $payload['status'],
         ])->save();
 
-        return ApiResponse::resource(new BillingRuleResource($billingRule->fresh()), 'Billing rule updated successfully.');
+        return ApiResponse::resource(new BillingRuleResource($billingRule->fresh()->load('profile:id,uuid,name,billing_interval,currency,status')), 'Billing rule updated successfully.');
+    }
+
+    /**
+     * Delete one billing rule.
+     */
+    public function destroyRule(BillingRule $billingRule)
+    {
+        DB::connection('base')->transaction(fn () => $billingRule->delete());
+
+        return ApiResponse::success(ApiMessages::deleted('billing rule'));
     }
 
     /**
@@ -263,26 +261,20 @@ class BillingProfileController extends Controller
                 'id',
                 'uuid',
                 'billing_profile_id',
-                'range_start',
-                'range_end',
-                'price_cents',
+                'unit_price_cents',
                 'currency',
                 'effective_from',
                 'effective_to',
-                'sort_order',
                 'status',
                 'created_at',
                 'updated_at',
             ])
-            ->with('profile:id,uuid,name,billing_interval,currency,status');
+            ->with([
+                'profile:id,uuid,name,billing_interval,currency,status',
+            ]);
 
         if ($billingProfile) {
             $query->where('billing_profile_id', $billingProfile->id);
-        } elseif (!empty($filters['billing_profile_uuid'] ?? null)) {
-            $billingProfileUuid = (string) $filters['billing_profile_uuid'];
-            $query->whereHas('profile', static function (EloquentBuilder $builder) use ($billingProfileUuid) {
-                $builder->where('uuid', $billingProfileUuid);
-            });
         }
 
         $this->applyBillingRuleFilters($query, $filters);
@@ -305,18 +297,6 @@ class BillingProfileController extends Controller
                 ->where(function (EloquentBuilder $innerQuery) use ($filters) {
                     $innerQuery->whereNull('effective_to')
                         ->orWhereDate('effective_to', '>=', $filters['effective_on']);
-                })
-                ->whereHas('profile', static function (EloquentBuilder $builder) {
-                    $builder->where('status', 'active');
-                });
-        }
-
-        if (array_key_exists('registered_units', $filters) && $filters['registered_units'] !== null) {
-            $registeredUnits = (int) $filters['registered_units'];
-            $query->where('range_start', '<=', $registeredUnits)
-                ->where(function (EloquentBuilder $innerQuery) use ($registeredUnits) {
-                    $innerQuery->whereNull('range_end')
-                        ->orWhere('range_end', '>=', $registeredUnits);
                 });
         }
     }
@@ -331,11 +311,52 @@ class BillingProfileController extends Controller
         $key = ltrim($sort, '-');
 
         match ($key) {
-            'price_cents' => $query->orderBy('price_cents', $direction)->orderBy('sort_order')->orderBy('range_start'),
-            'effective_from' => $query->orderBy('effective_from', $direction)->orderBy('sort_order')->orderBy('range_start'),
-            'created_at' => $query->orderBy('created_at', $direction)->orderBy('sort_order')->orderBy('range_start'),
-            'sort_order' => $query->orderBy('sort_order', $direction)->orderBy('range_start'),
-            default => $query->orderBy('range_start', $direction)->orderBy('sort_order')->orderBy('created_at'),
+            'unit_price_cents' => $query->orderBy('unit_price_cents', $direction)->orderByDesc('effective_from'),
+            'effective_from' => $query->orderBy('effective_from', $direction)->orderByDesc('created_at'),
+            'created_at' => $query->orderBy('created_at', $direction),
+            default => $query->orderByDesc('effective_from')->orderByDesc('created_at'),
         };
+    }
+
+    /**
+     * Persist a billing rule against the resolved profile.
+     */
+    private function persistBillingRule(array $data, BillingProfile $billingProfile)
+    {
+        $rule = BillingRule::query()->create([
+            'uuid' => (string) Str::uuid(),
+            'billing_profile_id' => $billingProfile->id,
+            'unit_price_cents' => $data['unit_price_cents'],
+            'currency' => strtoupper($data['currency'] ?? $billingProfile->currency),
+            'effective_from' => $data['effective_from'],
+            'effective_to' => $data['effective_to'] ?? null,
+            'status' => $data['status'] ?? 'active',
+        ]);
+
+        return ApiResponse::resource(
+            new BillingRuleResource($rule->load('profile:id,uuid,name,billing_interval,currency,status')),
+            'Billing rule created successfully.',
+            201
+        );
+    }
+
+    /**
+     * Resolve the billing profile used by a direct billing-rule create request.
+     */
+    private function resolveBillingProfileForRule(array $data): ?BillingProfile
+    {
+        $billingProfileUuid = $data['billing_profile_uuid'] ?? null;
+
+        if ($billingProfileUuid) {
+            return BillingProfile::query()
+                ->where('uuid', $billingProfileUuid)
+                ->first();
+        }
+
+        return BillingProfile::query()
+            ->where('status', 'active')
+            ->where('is_default', true)
+            ->orderByDesc('id')
+            ->first();
     }
 }

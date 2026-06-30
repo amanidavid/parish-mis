@@ -293,7 +293,7 @@ class AdminAnalyticsService
             $window = $this->resolveWindow($filters);
             $limit = (int) ($filters['limit'] ?? 5);
 
-            // We rank billing rules by collected amount because that is the strongest business signal for this chart.
+            // We rank default unit-price rules by collected amount because that is the strongest business signal for this chart.
             $rows = DB::connection('base')
                 ->table('property_subscription_payments')
                 ->join('billing_rules', 'billing_rules.id', '=', 'property_subscription_payments.billing_rule_id')
@@ -303,16 +303,12 @@ class AdminAnalyticsService
                 ->groupBy(
                     'billing_rules.id',
                     'billing_rules.uuid',
-                    'billing_rules.range_start',
-                    'billing_rules.range_end',
-                    'billing_rules.price_cents',
+                    'billing_rules.unit_price_cents',
                     'billing_rules.currency'
                 )
                 ->select([
                     'billing_rules.uuid as billing_rule_uuid',
-                    'billing_rules.range_start',
-                    'billing_rules.range_end',
-                    'billing_rules.price_cents',
+                    'billing_rules.unit_price_cents',
                     'billing_rules.currency',
                 ])
                 ->selectRaw('COUNT(property_subscription_payments.id) as payments_count')
@@ -320,7 +316,7 @@ class AdminAnalyticsService
                 ->selectRaw('COUNT(DISTINCT property_subscription_payments.tenant_id) as workspaces_count')
                 ->selectRaw('COALESCE(SUM(property_subscription_payments.total_amount_cents), 0) as total_collected_amount_cents')
                 ->orderByDesc('total_collected_amount_cents')
-                ->orderBy('billing_rules.range_start')
+                ->orderByDesc('billing_rules.unit_price_cents')
                 ->limit($limit)
                 ->get();
 
@@ -333,16 +329,10 @@ class AdminAnalyticsService
                     'total_collected_amount_cents' => (int) $rows->sum('total_collected_amount_cents'),
                 ],
                 'series' => $rows->map(function (object $row): array {
-                    $rangeEnd = $row->range_end !== null ? (int) $row->range_end : null;
-
                     return [
                         'billing_rule_uuid' => $row->billing_rule_uuid,
-                        'label' => $rangeEnd !== null
-                            ? sprintf('%d-%d properties', (int) $row->range_start, $rangeEnd)
-                            : sprintf('%d+ properties', (int) $row->range_start),
-                        'range_start' => (int) $row->range_start,
-                        'range_end' => $rangeEnd,
-                        'price_cents' => (int) $row->price_cents,
+                        'label' => 'Default unit price - '.number_format((int) $row->unit_price_cents).' / unit',
+                        'unit_price_cents' => (int) $row->unit_price_cents,
                         'currency' => $row->currency,
                         'properties_count' => (int) $row->properties_count,
                         'workspaces_count' => (int) $row->workspaces_count,

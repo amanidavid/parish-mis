@@ -14,8 +14,8 @@ class WorkspacePropertySubscriptionPaymentResource extends ApiJsonResource
         return [
             'uuid' => $this->uuid,
             'months_paid' => (int) $this->months_paid,
-            'rule_range_start' => (int) $this->rule_range_start,
-            'rule_range_end' => $this->rule_range_end !== null ? (int) $this->rule_range_end : null,
+            'unit_count_at_payment' => (int) $this->unit_count_at_payment,
+            'unit_price_cents_at_payment' => (int) $this->unit_price_cents_at_payment,
             'monthly_price_cents' => (int) $this->monthly_price_cents,
             'total_amount_cents' => (int) $this->total_amount_cents,
             'currency' => $currency,
@@ -45,19 +45,15 @@ class WorkspacePropertySubscriptionPaymentResource extends ApiJsonResource
             ] : null,
             'billing_rule' => $this->billingRule ? [
                 'uuid' => $this->billingRule->uuid,
-                'range_start' => (int) $this->billingRule->range_start,
-                'range_end' => $this->billingRule->range_end !== null ? (int) $this->billingRule->range_end : null,
-                'price_cents' => (int) $this->billingRule->price_cents,
-                'currency' => $this->billingRule->profile?->currency ?? $currency,
+                'unit_price_cents' => (int) $this->billingRule->unit_price_cents,
+                'currency' => $this->billingRule->currency ?? $currency,
                 'price_formatted' => $this->formatMoneyFromCents(
-                    (int) $this->billingRule->price_cents,
-                    $this->billingRule->profile?->currency ?? $currency
+                    (int) $this->billingRule->unit_price_cents,
+                    $this->billingRule->currency ?? $currency
                 ),
-                'billing_profile' => $this->billingRule->profile ? [
-                    'uuid' => $this->billingRule->profile->uuid,
-                    'name' => $this->billingRule->profile->name,
-                    'billing_interval' => $this->billingRule->profile->billing_interval,
-                ] : null,
+                'effective_from' => $this->billingRule->effective_from?->toDateString(),
+                'effective_to' => $this->billingRule->effective_to?->toDateString(),
+                'scope' => 'global_default',
             ] : null,
             ...$this->timestamps(),
         ];

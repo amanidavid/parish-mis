@@ -134,9 +134,7 @@ class PropertySubscriptionReportController extends Controller
             'current_period_ends_on' => $row['current_period_ends_on'] ?? null,
             'last_paid_on' => $row['last_paid_on'] ?? null,
             'billing_rule_uuid' => $row['billing_rule_uuid'] ?? null,
-            'range_start' => $row['range_start'] !== null ? (int) $row['range_start'] : null,
-            'range_end' => $row['range_end'] !== null ? (int) $row['range_end'] : null,
-            'price_cents' => $row['price_cents'] !== null ? (int) $row['price_cents'] : null,
+            'unit_price_cents' => $row['unit_price_cents'] !== null ? (int) $row['unit_price_cents'] : null,
             'currency' => $row['currency'] ?? null,
         ];
     }

@@ -13,7 +13,6 @@ use App\Models\Tenant\Property;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertySubscriptionAccessService;
-use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
@@ -32,7 +31,6 @@ class PropertyFloorController extends Controller
     public function __construct(
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
         private SubscriptionService $subscriptionService,
-        private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
     ) {
@@ -193,10 +191,6 @@ class PropertyFloorController extends Controller
             return ApiResponse::error('Floor already exists', ['floor_number' => ['Duplicate floor number for this property']], 422);
         }
 
-        if ($hadUnits && $originalPropertyId !== (int) $property->id) {
-            $this->captureUsageBaseline();
-        }
-
         DB::transaction(function () use ($propertyFloor, $property, $name, $floorNumber) {
             $propertyFloor->fill([
                 'property_id' => $property->id,
@@ -229,10 +223,6 @@ class PropertyFloorController extends Controller
             return $error;
         }
 
-        if ($hadUnits) {
-            $this->captureUsageBaseline();
-        }
-
         DB::transaction(fn () => $propertyFloor->delete());
 
         if ($hadUnits) {
@@ -251,7 +241,6 @@ class PropertyFloorController extends Controller
 
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->syncWorkspaceUsage($tenant);
-            $this->subscriptionUsageAdjustmentService->syncPendingAdjustment($tenant);
             if ($propertyIds !== []) {
                 $this->workspacePropertyRegistryService->syncPropertyIds($tenant, $propertyIds);
             }
@@ -267,18 +256,6 @@ class PropertyFloorController extends Controller
 
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
-        }
-    }
-
-    /**
-     * Capture usage baseline.
-     */
-    private function captureUsageBaseline(): void
-    {
-        $tenant = request()->attributes->get('tenant');
-
-        if ($tenant instanceof Tenant) {
-            $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
         }
     }
 

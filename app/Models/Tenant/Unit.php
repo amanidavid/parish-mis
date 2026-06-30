@@ -19,6 +19,10 @@ class Unit extends BaseModel
 
     protected $table = 'units';
 
+    protected $casts = [
+        'monthly_rent_amount' => 'decimal:2',
+    ];
+
     public function propertyFloor(): BelongsTo
     {
         return $this->belongsTo(PropertyFloor::class);

@@ -5,6 +5,7 @@ namespace App\Models\Tenant;
 use App\Models\BaseModel;
 use Illuminate\Support\Carbon;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class CustomerContract extends BaseModel
@@ -15,6 +16,14 @@ class CustomerContract extends BaseModel
         'start_date' => 'date',
         'end_date' => 'date',
         'amount' => 'decimal:2',
+        'unit_price_at_contract' => 'decimal:2',
+        'expected_total_amount' => 'decimal:2',
+        'final_payable_amount' => 'decimal:2',
+        'paid_amount_total' => 'decimal:2',
+        'refund_amount_total' => 'decimal:2',
+        'net_collected_amount' => 'decimal:2',
+        'outstanding_balance' => 'decimal:2',
+        'termination_date' => 'date',
     ];
 
     public function customer(): BelongsTo
@@ -30,6 +39,11 @@ class CustomerContract extends BaseModel
     public function documents(): MorphMany
     {
         return $this->morphMany(Document::class, 'documentable');
+    }
+
+    public function transactions(): HasMany
+    {
+        return $this->hasMany(CustomerContractTransaction::class, 'customer_contract_id');
     }
 
     /**

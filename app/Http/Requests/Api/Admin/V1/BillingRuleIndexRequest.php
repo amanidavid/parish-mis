@@ -14,11 +14,9 @@ class BillingRuleIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'billing_profile_uuid' => ['nullable', 'uuid'],
-            'registered_units' => ['nullable', 'integer', 'min:0'],
             'status' => ['nullable', 'in:active,inactive'],
             'effective_on' => ['nullable', 'date'],
-            'sort' => ['nullable', 'in:range_start,-range_start,price_cents,-price_cents,effective_from,-effective_from,sort_order,-sort_order,created_at,-created_at'],
+            'sort' => ['nullable', 'in:unit_price_cents,-unit_price_cents,effective_from,-effective_from,created_at,-created_at'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ];
     }

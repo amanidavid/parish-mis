@@ -2,12 +2,10 @@
 
 namespace App\Services\V1\Billing;
 
-use App\Models\Landlord\BillingRule;
 use App\Models\Landlord\PropertySubscription;
 use App\Models\Landlord\PropertySubscriptionPayment;
 use App\Models\Landlord\WorkspaceProperty;
 use App\Models\Tenancy\Tenant;
-use App\Services\V1\BillingProfileService;
 use App\Services\V1\SubscriptionService;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -27,7 +25,7 @@ class PropertySubscriptionService
     public function __construct(
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
-        private BillingProfileService $billingProfileService,
+        private WorkspaceBillingRuleService $workspaceBillingRuleService,
         private SubscriptionService $subscriptionService,
     ) {
     }
@@ -41,7 +39,7 @@ class PropertySubscriptionService
 
         $query = WorkspaceProperty::query()
             ->with([
-                'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
+                'subscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
                 'subscription.latestPayment',
                 'latestPayment',
             ])
@@ -85,7 +83,7 @@ class PropertySubscriptionService
     {
         $workspaceProperty = WorkspaceProperty::query()
             ->with([
-                'subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
+                'subscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
                 'subscription.latestPayment',
                 'latestPayment',
                 'payments' => fn ($builder) => $builder
@@ -120,12 +118,13 @@ class PropertySubscriptionService
     public function previewPayment(Tenant $tenant, array $payload): array
     {
         $workspaceProperty = $this->resolvePayableWorkspaceProperty($tenant, (string) $payload['property_uuid']);
-        $billingRule = $this->resolveBillableRule((string) $payload['billing_rule_uuid'], (string) $payload['payment_date']);
         $monthsPaid = (int) $payload['months_paid'];
         $paymentDate = Carbon::parse($payload['payment_date'])->startOfDay();
+        $billingRule = $this->workspaceBillingRuleService->requireActiveRule($paymentDate);
         $subscription = $workspaceProperty->subscription;
         $coverage = $this->resolveCoverage($tenant, $subscription, $paymentDate, $monthsPaid);
-        $monthlyPrice = (int) $billingRule->price_cents;
+        $unitCount = (int) $workspaceProperty->current_registered_units_total;
+        $monthlyPrice = $this->workspaceBillingRuleService->calculateMonthlyCharge($unitCount, $billingRule);
         $workspaceTrialEndsOn = $this->propertySubscriptionAccessService->activeWorkspaceTrialEndsOn($tenant, $paymentDate);
 
         return [
@@ -134,25 +133,16 @@ class PropertySubscriptionService
                 'uuid' => $workspaceProperty->property_uuid,
                 'name' => $workspaceProperty->property_name,
                 'status' => $workspaceProperty->property_status,
-                'current_registered_units_total' => (int) $workspaceProperty->current_registered_units_total,
+                'current_registered_units_total' => $unitCount,
                 'is_deleted' => $workspaceProperty->property_deleted_at !== null,
             ],
             'subscription_before' => $this->formatSubscription($subscription),
-            'billing_rule' => [
-                'uuid' => $billingRule->uuid,
-                'range_start' => (int) $billingRule->range_start,
-                'range_end' => $billingRule->range_end !== null ? (int) $billingRule->range_end : null,
-                'price_cents' => $monthlyPrice,
-                'currency' => $billingRule->profile?->currency ?? 'TZS',
-                'billing_profile' => $billingRule->profile ? [
-                    'uuid' => $billingRule->profile->uuid,
-                    'name' => $billingRule->profile->name,
-                    'billing_interval' => $billingRule->profile->billing_interval,
-                ] : null,
-            ],
+            'billing_rule' => $this->workspaceBillingRuleService->formatRule($billingRule),
             'payment' => [
                 'months_paid' => $monthsPaid,
                 'payment_date' => $paymentDate->toDateString(),
+                'unit_count_at_payment' => $unitCount,
+                'unit_price_cents_at_payment' => (int) $billingRule->unit_price_cents,
                 'monthly_price_cents' => $monthlyPrice,
                 'total_amount_cents' => $monthlyPrice * $monthsPaid,
                 'reference_number' => $payload['reference_number'] ?? null,
@@ -183,8 +173,8 @@ class PropertySubscriptionService
     public function recordPayment(Tenant $tenant, array $payload, ?object $adminUser = null): PropertySubscriptionPayment
     {
         $workspaceProperty = $this->resolvePayableWorkspaceProperty($tenant, (string) $payload['property_uuid']);
-        $billingRule = $this->resolveBillableRule((string) $payload['billing_rule_uuid'], (string) $payload['payment_date']);
         $paymentDate = Carbon::parse($payload['payment_date'])->startOfDay();
+        $billingRule = $this->workspaceBillingRuleService->requireActiveRule($paymentDate);
         $monthsPaid = (int) $payload['months_paid'];
 
         return DB::connection('base')->transaction(function () use ($tenant, $workspaceProperty, $billingRule, $paymentDate, $monthsPaid, $payload, $adminUser) {
@@ -212,6 +202,8 @@ class PropertySubscriptionService
             }
 
             $coverage = $this->resolveCoverage($tenant, $subscription, $paymentDate, $monthsPaid);
+            $unitCount = (int) $lockedProperty->current_registered_units_total;
+            $monthlyPrice = $this->workspaceBillingRuleService->calculateMonthlyCharge($unitCount, $billingRule);
             $payment = PropertySubscriptionPayment::query()->create([
                 'tenant_id' => $tenant->id,
                 'workspace_property_id' => $lockedProperty->id,
@@ -219,11 +211,11 @@ class PropertySubscriptionService
                 'billing_rule_id' => $billingRule->id,
                 'recorded_by_user_id' => $adminUser?->id,
                 'months_paid' => $monthsPaid,
-                'rule_range_start' => (int) $billingRule->range_start,
-                'rule_range_end' => $billingRule->range_end !== null ? (int) $billingRule->range_end : null,
-                'monthly_price_cents' => (int) $billingRule->price_cents,
-                'total_amount_cents' => (int) $billingRule->price_cents * $monthsPaid,
-                'currency' => $billingRule->profile?->currency ?? 'TZS',
+                'unit_count_at_payment' => $unitCount,
+                'unit_price_cents_at_payment' => (int) $billingRule->unit_price_cents,
+                'monthly_price_cents' => $monthlyPrice,
+                'total_amount_cents' => $monthlyPrice * $monthsPaid,
+                'currency' => $billingRule->currency ?? 'TZS',
                 'payment_date' => $paymentDate->toDateString(),
                 'coverage_starts_on' => $coverage['starts_on']->toDateString(),
                 'coverage_ends_on' => $coverage['ends_on']->toDateString(),
@@ -231,8 +223,8 @@ class PropertySubscriptionService
                 'notes' => $payload['notes'] ?? null,
                 'meta' => [
                     'recorded_by_name' => $adminUser?->name ?? null,
-                    'billing_profile_uuid' => $billingRule->profile?->uuid,
-                    'billing_profile_name' => $billingRule->profile?->name,
+                    'workspace_uuid' => $tenant->uuid,
+                    'workspace_name' => $tenant->display_name,
                 ],
             ]);
 
@@ -247,9 +239,9 @@ class PropertySubscriptionService
             ])->save();
 
             return $payment->load([
-                'workspaceProperty.subscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
-                'propertySubscription.billingRule.profile:id,uuid,name,billing_interval,currency,status',
-                'billingRule.profile:id,uuid,name,billing_interval,currency,status',
+                'workspaceProperty.subscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
+                'propertySubscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
+                'billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
             ]);
         });
     }
@@ -262,18 +254,12 @@ class PropertySubscriptionService
         $query = PropertySubscriptionPayment::query()
             ->with($this->paymentRelations())
             ->join('workspace_properties as payment_workspace_properties', 'payment_workspace_properties.id', '=', 'property_subscription_payments.workspace_property_id')
-            ->leftJoin('billing_rules as payment_billing_rules', 'payment_billing_rules.id', '=', 'property_subscription_payments.billing_rule_id')
             ->select('property_subscription_payments.*')
             ->where('property_subscription_payments.tenant_id', $tenant->id);
 
         if (!empty($filters['property_uuid'] ?? null)) {
             $propertyUuid = (string) $filters['property_uuid'];
             $query->where('payment_workspace_properties.property_uuid', $propertyUuid);
-        }
-
-        if (!empty($filters['billing_rule_uuid'] ?? null)) {
-            $billingRuleUuid = (string) $filters['billing_rule_uuid'];
-            $query->where('payment_billing_rules.uuid', $billingRuleUuid);
         }
 
         if (!empty($filters['search'] ?? null)) {
@@ -428,7 +414,6 @@ class PropertySubscriptionService
             ->join('tenants', 'tenants.id', '=', 'workspace_properties.tenant_id')
             ->leftJoin('property_subscriptions', 'property_subscriptions.workspace_property_id', '=', 'workspace_properties.id')
             ->leftJoin('billing_rules', 'billing_rules.id', '=', 'property_subscriptions.billing_rule_id')
-            ->leftJoin('billing_profiles', 'billing_profiles.id', '=', 'billing_rules.billing_profile_id')
             ->whereNull('workspace_properties.property_deleted_at')
             ->where(function ($builder) {
                 $builder
@@ -456,10 +441,8 @@ class PropertySubscriptionService
                 'property_subscriptions.current_period_ends_on',
                 'property_subscriptions.last_paid_on',
                 'billing_rules.uuid as billing_rule_uuid',
-                'billing_rules.range_start',
-                'billing_rules.range_end',
-                'billing_rules.price_cents',
-                'billing_profiles.currency',
+                'billing_rules.unit_price_cents',
+                'billing_rules.currency',
             ])
             ->selectRaw($this->effectiveStatusExpression('property_subscriptions', $today).' as effective_status');
 
@@ -522,32 +505,6 @@ class PropertySubscriptionService
     }
 
     /**
-     * Resolve billable rule.
-     */
-    private function resolveBillableRule(string $billingRuleUuid, string $paymentDate): BillingRule
-    {
-        $paymentDate = Carbon::parse($paymentDate)->toDateString();
-
-        $billingRule = BillingRule::query()
-            ->with('profile:id,uuid,name,billing_interval,currency,status')
-            ->where('uuid', $billingRuleUuid)
-            ->where('status', 'active')
-            ->where('effective_from', '<=', $paymentDate)
-            ->where(function (EloquentBuilder $builder) use ($paymentDate) {
-                $builder
-                    ->whereNull('effective_to')
-                    ->orWhere('effective_to', '>=', $paymentDate);
-            })
-            ->first();
-
-        if (!$billingRule || !$billingRule->profile || $billingRule->profile->status !== 'active') {
-            throw new InvalidArgumentException('The selected billing rule is not valid for the payment date you entered.');
-        }
-
-        return $billingRule;
-    }
-
-    /**
      * Resolve coverage.
      */
     private function resolveCoverage(Tenant $tenant, ?PropertySubscription $subscription, CarbonInterface $paymentDate, int $monthsPaid): array
@@ -587,41 +544,31 @@ class PropertySubscriptionService
     private function buildNextBillingPreview(Tenant $tenant, WorkspaceProperty $workspaceProperty): ?array
     {
         $subscription = $workspaceProperty->subscription;
-        $currentRule = $subscription?->billingRule;
-        $billingProfile = $currentRule?->profile
-            ?? $this->subscriptionService->currentSubscription($tenant)?->billingProfile
-            ?? $this->subscriptionService->resolveWorkspaceBillingProfile($tenant);
+        $currentRule = $this->workspaceBillingRuleService->activeRule();
 
-        if (!$billingProfile) {
+        if (!$currentRule) {
             return null;
         }
 
         $nextPaymentDate = $subscription?->current_period_ends_on
             ? Carbon::parse($subscription->current_period_ends_on)->addDay()->startOfDay()
             : Carbon::today();
-        $projectedRule = $this->billingProfileService->matchingRule(
-            $billingProfile,
-            (int) $workspaceProperty->current_registered_units_total,
-            $nextPaymentDate
-        );
-
-        if (!$projectedRule) {
-            return null;
-        }
-
+        $projectedRule = $this->workspaceBillingRuleService->activeRule($nextPaymentDate) ?? $currentRule;
         $currentMonthlyPriceCents = (int) (
             $workspaceProperty->getRelation('activePayment')?->monthly_price_cents
             ?? $workspaceProperty->latestPayment?->monthly_price_cents
-            ?? $currentRule?->price_cents
+            ?? $this->workspaceBillingRuleService->calculateMonthlyCharge(
+                (int) $workspaceProperty->current_registered_units_total,
+                $currentRule
+            )
             ?? 0
         );
-        $projectedMonthlyPriceCents = (int) $projectedRule->price_cents;
+        $projectedMonthlyPriceCents = $this->workspaceBillingRuleService->calculateMonthlyCharge(
+            (int) $workspaceProperty->current_registered_units_total,
+            $projectedRule
+        );
         $priceChangeCents = $projectedMonthlyPriceCents - $currentMonthlyPriceCents;
         $unitsNow = (int) $workspaceProperty->current_registered_units_total;
-        $isOutsideCurrentRule = $currentRule
-            ? $unitsNow < (int) $currentRule->range_start
-                || ($currentRule->range_end !== null && $unitsNow > (int) $currentRule->range_end)
-            : false;
 
         return [
             'payment_due_on' => $nextPaymentDate->toDateString(),
@@ -629,26 +576,15 @@ class PropertySubscriptionService
             'current_monthly_price_cents' => $currentMonthlyPriceCents,
             'projected_monthly_price_cents' => $projectedMonthlyPriceCents,
             'price_change_cents' => $priceChangeCents,
-            'currency' => $projectedRule->profile?->currency ?? $billingProfile->currency ?? 'TZS',
+            'currency' => $projectedRule->currency ?? 'TZS',
             'has_price_change' => $priceChangeCents !== 0,
-            'units_exceed_current_rule' => $isOutsideCurrentRule,
-            'current_billing_rule' => $currentRule ? [
-                'uuid' => $currentRule->uuid,
-                'range_start' => (int) $currentRule->range_start,
-                'range_end' => $currentRule->range_end !== null ? (int) $currentRule->range_end : null,
-                'price_cents' => (int) $currentRule->price_cents,
-            ] : null,
-            'projected_billing_rule' => [
-                'uuid' => $projectedRule->uuid,
-                'range_start' => (int) $projectedRule->range_start,
-                'range_end' => $projectedRule->range_end !== null ? (int) $projectedRule->range_end : null,
-                'price_cents' => $projectedMonthlyPriceCents,
-            ],
+            'current_billing_rule' => $this->workspaceBillingRuleService->formatRule($currentRule),
+            'projected_billing_rule' => $this->workspaceBillingRuleService->formatRule($projectedRule),
             'message' => $priceChangeCents > 0
-                ? 'The next payment will increase because the property now falls into a higher unit range.'
+                ? 'The next payment will increase because the property now has more registered units than the last paid snapshot.'
                 : ($priceChangeCents < 0
-                    ? 'The next payment will reduce because the property now falls into a lower unit range.'
-                    : 'The next payment remains the same for the current unit range.'),
+                    ? 'The next payment will reduce because the property now has fewer registered units than the last paid snapshot.'
+                    : 'The next payment remains the same for the current unit count and workspace unit price.'),
         ];
     }
 
@@ -926,8 +862,7 @@ class PropertySubscriptionService
         return [
             'workspaceProperty:id,uuid,tenant_id,property_uuid,property_name,property_status,current_registered_units_total,property_deleted_at',
             'propertySubscription:id,uuid,workspace_property_id,status,current_period_starts_on,current_period_ends_on,last_paid_on',
-            'billingRule:id,uuid,billing_profile_id,range_start,range_end,price_cents,status,effective_from,effective_to',
-            'billingRule.profile:id,uuid,name,billing_interval,currency,status',
+            'billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
         ];
     }
 

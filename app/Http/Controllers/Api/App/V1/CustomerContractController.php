@@ -6,9 +6,11 @@ use App\Http\Controllers\Api\App\V1\Concerns\InteractsWithTenantModels;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\CustomerContractIndexRequest;
 use App\Http\Requests\Api\App\V1\CustomerContractNextNumberRequest;
+use App\Http\Requests\Api\App\V1\StoreCustomerContractPaymentRequest;
 use App\Http\Requests\Api\App\V1\StoreCustomerContractRequest;
 use App\Http\Requests\Api\App\V1\UpdateCustomerContractRequest;
 use App\Http\Resources\App\V1\CustomerContractResource;
+use App\Http\Resources\App\V1\CustomerContractPaymentResource;
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
 use App\Models\Tenant\Property;
@@ -16,6 +18,7 @@ use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertySubscriptionAccessService;
+use App\Services\V1\Occupancy\CustomerContractFinanceService;
 use App\Services\V1\Occupancy\CustomerContractRuleService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
@@ -34,6 +37,7 @@ class CustomerContractController extends Controller
      */
     public function __construct(
         private CustomerContractRuleService $ruleService,
+        private CustomerContractFinanceService $financeService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private SubscriptionService $subscriptionService,
@@ -87,16 +91,20 @@ class CustomerContractController extends Controller
             $query->where('status', $filters['status']);
         }
 
+        if (!empty($filters['payment_status'] ?? null)) {
+            $query->where('payment_status', $filters['payment_status']);
+        }
+
         if (!empty($filters['search'] ?? null)) {
             $query->where(function ($innerQuery) use ($filters) {
                 $innerQuery
-                    ->where('contract_number', 'like', $filters['search'] . '%')
-                    ->orWhereHas('customer', fn ($customerQuery) => $customerQuery->where('display_name', 'like', $filters['search'] . '%'));
+                    ->where('contract_number', 'like', $filters['search'].'%')
+                    ->orWhereHas('customer', fn ($customerQuery) => $customerQuery->where('display_name', 'like', $filters['search'].'%'));
             });
         }
 
         if (!empty($filters['contract_number'] ?? null)) {
-            $query->where('contract_number', 'like', $filters['contract_number'] . '%');
+            $query->where('contract_number', 'like', $filters['contract_number'].'%');
         }
 
         if (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null)) {
@@ -155,6 +163,8 @@ class CustomerContractController extends Controller
             'unit_uuid' => $unit->uuid,
             'property_uuid' => $unit->propertyFloor->property->uuid,
             'start_date' => $startDate,
+            'monthly_rent_amount' => (float) $unit->monthly_rent_amount,
+            'rent_currency' => $unit->rent_currency ?? 'TZS',
         ]);
     }
 
@@ -180,6 +190,14 @@ class CustomerContractController extends Controller
             return ApiResponse::error('Unit property not found', ['unit_uuid' => ['The selected unit is not attached to a valid property.']], 422);
         }
 
+        if ((float) ($unit->monthly_rent_amount ?? 0) <= 0) {
+            return ApiResponse::error(
+                'Unit price not configured',
+                ['unit_uuid' => ['Set the unit monthly price before creating a contract for this unit.']],
+                422
+            );
+        }
+
         if ($response = $this->ensureUserCanAccessProperty($unit->propertyFloor->property)) {
             return $response;
         }
@@ -192,11 +210,24 @@ class CustomerContractController extends Controller
             return $error;
         }
 
-        if ($this->ruleService->hasOverlappingUnitContract($unitId, $data['start_date'], $data['end_date'] ?? null)) {
+        $computedEndDate = $this->financeService->calculateEndDate((string) $data['start_date'], (int) $data['contract_months']);
+        $expectedTotal = $this->financeService->calculateExpectedTotal(
+            (float) $unit->monthly_rent_amount,
+            (int) $data['contract_months']
+        );
+
+        if ($error = $this->validateInitialPaymentAmount((float) ($data['initial_amount_paid'] ?? 0), $expectedTotal)) {
+            return $error;
+        }
+
+        if ($this->ruleService->hasOverlappingUnitContract($unitId, $data['start_date'], $computedEndDate)) {
             return ApiResponse::error('Contract period conflict', ['unit_uuid' => ['This unit already has an overlapping contract period']], 422);
         }
 
         $contract = DB::transaction(function () use ($customer, $unitId, $data, $unit) {
+            $contractMonths = (int) $data['contract_months'];
+            $expectedTotal = $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $contractMonths);
+
             $contract = CustomerContract::query()->create([
                 'customer_id' => $customer->id,
                 'unit_id' => $unitId,
@@ -205,12 +236,35 @@ class CustomerContractController extends Controller
                     (string) $data['start_date']
                 ),
                 'start_date' => $data['start_date'],
-                'end_date' => $data['end_date'] ?? null,
-                'amount' => $data['amount'],
-                'currency' => strtoupper($data['currency'] ?? 'TZS'),
+                'end_date' => $this->financeService->calculateEndDate((string) $data['start_date'], $contractMonths),
+                'contract_months' => $contractMonths,
+                'unit_price_at_contract' => (float) $unit->monthly_rent_amount,
+                'amount' => $expectedTotal,
+                'expected_total_amount' => $expectedTotal,
+                'final_payable_amount' => $expectedTotal,
+                'currency' => strtoupper($unit->rent_currency ?? 'TZS'),
                 'status' => $data['status'] ?? 'draft',
                 'notes' => $data['notes'] ?? null,
             ]);
+
+            if ((float) ($data['initial_amount_paid'] ?? 0) > 0) {
+                $this->financeService->recordPayment(
+                    $contract,
+                    (float) $data['initial_amount_paid'],
+                    $data['payment_date'] ?? $data['start_date'],
+                    'Initial contract payment.'
+                );
+            }
+
+            $contract = $this->financeService->syncContractFinancials($contract);
+
+            if ($contract->status === 'terminated' && $contract->termination_date) {
+                $contract = $this->financeService->terminateContract(
+                    $contract,
+                    $contract->termination_date->toDateString(),
+                    $contract->termination_reason
+                );
+            }
 
             $this->ruleService->syncUnitOccupancyStatus($unitId);
             $this->ruleService->syncCustomerStatuses([$customer->id]);
@@ -219,7 +273,7 @@ class CustomerContractController extends Controller
         });
 
         return ApiResponse::resource(
-            new CustomerContractResource($contract->load(['customer.property', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
+            new CustomerContractResource($contract->load(['customer.property', 'unit.propertyFloor.property', 'documents', 'transactions'])->loadCount('documents')),
             ApiMessages::created('customer contract'),
             201
         );
@@ -233,9 +287,78 @@ class CustomerContractController extends Controller
         $this->authorize('view', $customerContract);
 
         return ApiResponse::resource(
-            new CustomerContractResource($customerContract->load(['customer.property', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
+            new CustomerContractResource($customerContract->load(['customer.property', 'unit.propertyFloor.property', 'documents', 'transactions'])->loadCount('documents')),
             ApiMessages::detailsRetrieved('customer contract')
         );
+    }
+
+    /**
+     * Record a contract payment.
+     */
+    public function recordPayment(StoreCustomerContractPaymentRequest $request, CustomerContract $customerContract)
+    {
+        $this->authorize('update', $customerContract);
+        $this->assertWorkspaceAllowsInventoryMutation();
+
+        $customerContract->loadMissing('unit.propertyFloor.property');
+        $property = $customerContract->unit?->propertyFloor?->property;
+
+        if (!$property) {
+            return ApiResponse::error(
+                'Contract property not found.',
+                ['customer_contract' => ['The selected contract is not attached to a valid property.']],
+                422
+            );
+        }
+
+        if ($response = $this->ensureUserCanAccessProperty($property)) {
+            return $response;
+        }
+
+        if ($customerContract->status === 'terminated') {
+            return ApiResponse::error(
+                'Cannot record payment for a terminated contract.',
+                ['contract' => ['Terminated contracts cannot receive new payments.']],
+                422
+            );
+        }
+
+        if ($customerContract->payment_status === 'paid' || (float) $customerContract->outstanding_balance <= 0) {
+            return ApiResponse::error(
+                'Contract is already fully paid.',
+                ['amount_paid' => ['There is no remaining balance to collect for this contract.']],
+                422
+            );
+        }
+
+        $data = $request->validated();
+
+        if ($error = $this->validateAdditionalPaymentAmount(
+            (float) $data['amount_paid'],
+            $customerContract,
+            (float) $customerContract->expected_total_amount
+        )) {
+            return $error;
+        }
+
+        DB::transaction(function () use ($customerContract, $data) {
+            $this->financeService->recordPayment(
+                $customerContract,
+                (float) $data['amount_paid'],
+                (string) $data['payment_date'],
+                $data['notes'] ?? 'Contract payment recorded.'
+            );
+
+            $this->financeService->syncContractFinancials($customerContract);
+        });
+
+        return ApiResponse::success('Contract payment recorded successfully.', [
+            'payment' => new CustomerContractPaymentResource(
+                $customerContract->fresh()->load([
+                    'transactions' => fn ($query) => $query->latest('transaction_date')->latest('id')->limit(1),
+                ])
+            ),
+        ]);
     }
 
     /**
@@ -284,10 +407,53 @@ class CustomerContractController extends Controller
             }
         }
 
-        $startDate = $data['start_date'] ?? $customerContract->start_date?->toDateString();
-        $endDate = array_key_exists('end_date', $data)
-            ? $data['end_date']
-            : $customerContract->end_date?->toDateString();
+        if ((float) ($unit->monthly_rent_amount ?? 0) <= 0) {
+            return ApiResponse::error(
+                'Unit price not configured',
+                ['unit_uuid' => ['Set the unit monthly price before updating this contract.']],
+                422
+            );
+        }
+
+        if ($customerContract->transactions()->exists() && $this->changesPricingAnchorFields($data, $customerContract, $unitId)) {
+            return ApiResponse::error(
+                'Paid contract cannot be repriced.',
+                ['contract' => ['This contract already has payment records, so unit, start date, and contract months cannot be changed. Create a new contract for the new unit, or terminate this one first if the tenant is moving.']],
+                422
+            );
+        }
+
+        if ($customerContract->status === 'terminated' && array_key_exists('status', $data) && $data['status'] !== 'terminated') {
+            return ApiResponse::error(
+                'Terminated contract cannot be reopened.',
+                ['status' => ['Terminated contracts cannot be changed back to another lifecycle status.']],
+                422
+            );
+        }
+
+        if (($data['status'] ?? $customerContract->status) === 'terminated' && array_key_exists('additional_amount_paid', $data)) {
+            return ApiResponse::error(
+                'Payment and termination must be done separately.',
+                ['additional_amount_paid' => ['You cannot record a payment while terminating the same contract. Record the payment first, or terminate the contract and let the system compute any refund automatically.']],
+                422
+            );
+        }
+
+        $startDate = (string) ($data['start_date'] ?? $customerContract->start_date?->toDateString());
+        $contractMonths = (int) ($data['contract_months'] ?? $customerContract->contract_months);
+        $endDate = $this->financeService->calculateEndDate($startDate, $contractMonths);
+        $hasTransactions = $customerContract->transactions()->exists();
+        $expectedTotal = $hasTransactions
+            ? (float) $customerContract->expected_total_amount
+            : $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $contractMonths);
+
+        if ($error = $this->validateAdditionalPaymentAmount(
+            (float) ($data['additional_amount_paid'] ?? 0),
+            $customerContract,
+            $expectedTotal
+        )) {
+            return $error;
+        }
 
         if ($error = $this->assertPropertyAllowsContractOperations($unit->propertyFloor->property, $startDate)) {
             return $error;
@@ -297,21 +463,50 @@ class CustomerContractController extends Controller
             return ApiResponse::error('Contract period conflict', ['unit_uuid' => ['This unit already has an overlapping contract period']], 422);
         }
 
-        DB::transaction(function () use ($customerContract, $customer, $unitId, $data) {
+        DB::transaction(function () use ($customerContract, $customer, $unitId, $data, $unit) {
             $previousUnitId = $customerContract->unit_id;
             $previousCustomerId = $customerContract->customer_id;
+            $hasTransactions = $customerContract->transactions()->exists();
+            $resolvedContractMonths = (int) ($data['contract_months'] ?? $customerContract->contract_months);
+            $resolvedStartDate = (string) ($data['start_date'] ?? $customerContract->start_date?->toDateString());
+            $expectedTotal = $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $resolvedContractMonths);
 
             $customerContract->fill([
                 'customer_id' => $customer->id,
                 'unit_id' => $unitId,
                 'contract_number' => isset($data['contract_number']) ? trim($data['contract_number']) : $customerContract->contract_number,
-                'start_date' => $data['start_date'] ?? $customerContract->start_date,
-                'end_date' => array_key_exists('end_date', $data) ? $data['end_date'] : $customerContract->end_date,
-                'amount' => $data['amount'] ?? $customerContract->amount,
-                'currency' => isset($data['currency']) ? strtoupper($data['currency']) : $customerContract->currency,
+                'start_date' => $resolvedStartDate,
+                'end_date' => $this->financeService->calculateEndDate($resolvedStartDate, $resolvedContractMonths),
+                'contract_months' => $resolvedContractMonths,
+                'unit_price_at_contract' => $hasTransactions ? $customerContract->unit_price_at_contract : (float) $unit->monthly_rent_amount,
+                'amount' => $hasTransactions ? $customerContract->amount : $expectedTotal,
+                'expected_total_amount' => $hasTransactions ? $customerContract->expected_total_amount : $expectedTotal,
+                'final_payable_amount' => $hasTransactions ? $customerContract->final_payable_amount : $expectedTotal,
+                'currency' => $hasTransactions ? $customerContract->currency : strtoupper($unit->rent_currency ?? $customerContract->currency),
                 'status' => $data['status'] ?? $customerContract->status,
+                'termination_date' => array_key_exists('termination_date', $data) ? $data['termination_date'] : $customerContract->termination_date,
+                'termination_reason' => array_key_exists('termination_reason', $data) ? $data['termination_reason'] : $customerContract->termination_reason,
                 'notes' => array_key_exists('notes', $data) ? $data['notes'] : $customerContract->notes,
             ])->save();
+
+            if ((float) ($data['additional_amount_paid'] ?? 0) > 0) {
+                $this->financeService->recordPayment(
+                    $customerContract,
+                    (float) $data['additional_amount_paid'],
+                    $data['payment_date'] ?? now()->toDateString(),
+                    'Additional contract payment.'
+                );
+            }
+
+            if (($data['status'] ?? $customerContract->status) === 'terminated' && !blank($customerContract->termination_date)) {
+                $this->financeService->terminateContract(
+                    $customerContract,
+                    (string) $customerContract->termination_date,
+                    $customerContract->termination_reason
+                );
+            } else {
+                $this->financeService->syncContractFinancials($customerContract);
+            }
 
             $this->ruleService->syncUnitOccupancyStatus($unitId);
             $this->ruleService->syncCustomerStatuses([$customer->id, $previousCustomerId]);
@@ -322,7 +517,7 @@ class CustomerContractController extends Controller
         });
 
         return ApiResponse::resource(
-            new CustomerContractResource($customerContract->fresh()->load(['customer.property', 'unit.propertyFloor.property', 'documents'])->loadCount('documents')),
+            new CustomerContractResource($customerContract->fresh()->load(['customer.property', 'unit.propertyFloor.property', 'documents', 'transactions'])->loadCount('documents')),
             ApiMessages::updated('customer contract')
         );
     }
@@ -448,8 +643,8 @@ class CustomerContractController extends Controller
                 }
             } catch (InvalidArgumentException $exception) {
                 return ApiResponse::error(
-                    'The selected contract start date is not paid for. Choose a start date that falls within the workspace trial period or the property subscription paid period.',
-                    ['property_subscription' => [$exception->getMessage()]],
+                    'This unit may be available, but the selected contract start date is outside the workspace trial or property subscription paid period.',
+                    ['property_subscription' => ['The unit is available for contracting, but the selected start date is not covered by the workspace trial or the property subscription paid period. Choose a covered start date or extend the property subscription first.']],
                     422
                 );
             }
@@ -479,5 +674,63 @@ class CustomerContractController extends Controller
         }
 
         return sprintf('CNT-%s-%d-%d', $year, $propertyId, $nextSequence);
+    }
+
+    private function changesPricingAnchorFields(array $data, CustomerContract $customerContract, int $resolvedUnitId): bool
+    {
+        if (array_key_exists('unit_uuid', $data) && $resolvedUnitId !== (int) $customerContract->unit_id) {
+            return true;
+        }
+
+        if (array_key_exists('start_date', $data) && (string) $data['start_date'] !== $customerContract->start_date?->toDateString()) {
+            return true;
+        }
+
+        return array_key_exists('contract_months', $data)
+            && (int) $data['contract_months'] !== (int) $customerContract->contract_months;
+    }
+
+    private function validateInitialPaymentAmount(float $initialAmountPaid, float $expectedTotal): ?\Illuminate\Http\JsonResponse
+    {
+        if ($initialAmountPaid <= 0) {
+            return null;
+        }
+
+        if ($initialAmountPaid - $expectedTotal > 0.00001) {
+            return ApiResponse::error(
+                'Initial payment is greater than the contract total.',
+                ['initial_amount_paid' => ['Initial amount paid cannot exceed the computed contract total for this contract.']],
+                422
+            );
+        }
+
+        return null;
+    }
+
+    private function validateAdditionalPaymentAmount(
+        float $additionalAmountPaid,
+        CustomerContract $customerContract,
+        float $expectedTotal
+    ): ?\Illuminate\Http\JsonResponse {
+        if ($additionalAmountPaid <= 0) {
+            return null;
+        }
+
+        $remainingBeforePayment = $customerContract->transactions()->exists()
+            ? (float) $customerContract->outstanding_balance
+            : max($expectedTotal - (float) $customerContract->net_collected_amount, 0);
+
+        if ($additionalAmountPaid - $remainingBeforePayment > 0.00001) {
+            return ApiResponse::error(
+                'Payment is greater than the remaining balance.',
+                [
+                    'additional_amount_paid' => ['Additional amount paid cannot exceed the remaining unpaid balance for this contract.'],
+                    'amount_paid' => ['Payment amount cannot exceed the remaining unpaid balance for this contract.'],
+                ],
+                422
+            );
+        }
+
+        return null;
     }
 }

@@ -13,7 +13,7 @@ class CustomerContractRuleService
 {
     public const OPEN_ENDED_CONTRACT_END_DATE = '9999-12-31';
     public const ACTIVE_OCCUPANCY_CONTRACT_STATUSES = ['active'];
-    public const OVERLAP_BLOCKING_CONTRACT_STATUSES = ['draft', 'active'];
+    public const OVERLAP_BLOCKING_CONTRACT_STATUSES = ['draft', 'active', 'terminated'];
 
     /**
      * Handle find duplicate customer.
@@ -79,12 +79,25 @@ class CustomerContractRuleService
     {
         $query = CustomerContract::query()
             ->where('unit_id', $unitId)
-            ->whereIn('status', self::OVERLAP_BLOCKING_CONTRACT_STATUSES)
-            ->where('start_date', '<=', $endDate ?? self::OPEN_ENDED_CONTRACT_END_DATE)
-            ->where(function (Builder $innerQuery) use ($startDate) {
-                $innerQuery
-                    ->whereNull('end_date')
-                    ->orWhere('end_date', '>=', $startDate);
+            ->where(function (Builder $statusQuery) use ($startDate, $endDate) {
+                $statusQuery
+                    ->where(function (Builder $activeQuery) use ($startDate, $endDate) {
+                        $activeQuery
+                            ->whereIn('status', ['draft', 'active'])
+                            ->where('start_date', '<=', $endDate ?? self::OPEN_ENDED_CONTRACT_END_DATE)
+                            ->where(function (Builder $innerQuery) use ($startDate) {
+                                $innerQuery
+                                    ->whereNull('end_date')
+                                    ->orWhere('end_date', '>=', $startDate);
+                            });
+                    })
+                    ->orWhere(function (Builder $terminatedQuery) use ($startDate, $endDate) {
+                        $terminatedQuery
+                            ->where('status', 'terminated')
+                            ->whereNotNull('termination_date')
+                            ->where('start_date', '<=', $endDate ?? self::OPEN_ENDED_CONTRACT_END_DATE)
+                            ->where('termination_date', '>', $startDate);
+                    });
             });
 
         if ($ignoreContractId) {
@@ -101,15 +114,8 @@ class CustomerContractRuleService
     {
         $today = Carbon::today()->toDateString();
 
-        $hasActiveOccupancy = CustomerContract::query()
+        $hasActiveOccupancy = $this->activeCustomerContractQuery($today)
             ->where('unit_id', $unitId)
-            ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-            ->where('start_date', '<=', $today)
-            ->where(function (Builder $query) use ($today) {
-                $query
-                    ->whereNull('end_date')
-                    ->orWhere('end_date', '>=', $today);
-            })
             ->exists();
 
         Unit::query()
@@ -248,12 +254,25 @@ class CustomerContractRuleService
     private function activeCustomerContractQuery(string $today): Builder
     {
         return CustomerContract::query()
-            ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-            ->where('start_date', '<=', $today)
             ->where(function (Builder $query) use ($today) {
                 $query
-                    ->whereNull('end_date')
-                    ->orWhere('end_date', '>=', $today);
+                    ->where(function (Builder $activeQuery) use ($today) {
+                        $activeQuery
+                            ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
+                            ->where('start_date', '<=', $today)
+                            ->where(function (Builder $dateQuery) use ($today) {
+                                $dateQuery
+                                    ->whereNull('end_date')
+                                    ->orWhere('end_date', '>=', $today);
+                            });
+                    })
+                    ->orWhere(function (Builder $terminatedQuery) use ($today) {
+                        $terminatedQuery
+                            ->where('status', 'terminated')
+                            ->where('start_date', '<=', $today)
+                            ->whereNotNull('termination_date')
+                            ->where('termination_date', '>', $today);
+                    });
             });
     }
 
@@ -262,15 +281,8 @@ class CustomerContractRuleService
      */
     private function activeCustomerIdsSubquery(string $today): QueryBuilder
     {
-        return CustomerContract::query()
+        return $this->activeCustomerContractQuery($today)
             ->select('customer_id')
-            ->whereIn('status', self::ACTIVE_OCCUPANCY_CONTRACT_STATUSES)
-            ->where('start_date', '<=', $today)
-            ->where(function (Builder $query) use ($today) {
-                $query
-                    ->whereNull('end_date')
-                    ->orWhere('end_date', '>=', $today);
-            })
             ->groupBy('customer_id')
             ->toBase();
     }

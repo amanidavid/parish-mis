@@ -15,7 +15,6 @@ abstract class PropertySubscriptionPaymentPayloadRequest extends FormRequest
     {
         return [
             'property_uuid' => ['required', 'uuid'],
-            'billing_rule_uuid' => ['required', 'uuid'],
             'months_paid' => ['required', 'integer', 'min:1', 'max:120'],
             'payment_date' => ['required', 'date'],
             'reference_number' => ['nullable', 'string', 'max:120'],

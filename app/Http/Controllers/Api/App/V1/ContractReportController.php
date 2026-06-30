@@ -120,7 +120,7 @@ class ContractReportController extends Controller
         }
 
         return ApiResponse::success(
-            'Monthly active contract amount chart retrieved successfully.',
+            'Monthly contract revenue chart retrieved successfully.',
             $this->contractReportService->monthlyActiveAmountChart($tenantUser, $request->validated())
         );
     }

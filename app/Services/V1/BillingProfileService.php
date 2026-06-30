@@ -55,8 +55,6 @@ class BillingProfileService
      */
     public function hasOverlappingRule(BillingProfile $profile, array $payload, ?int $ignoreRuleId = null): bool
     {
-        $rangeStart = (int) $payload['range_start'];
-        $rangeEnd = $payload['range_end'] ?? null;
         $effectiveFrom = $payload['effective_from'];
         $effectiveTo = $payload['effective_to'] ?? null;
 
@@ -64,26 +62,6 @@ class BillingProfileService
             ->where('billing_profile_id', $profile->id)
             ->when($ignoreRuleId !== null, fn ($query) => $query->whereKeyNot($ignoreRuleId))
             ->where('status', 'active')
-            ->where(function ($query) use ($rangeStart, $rangeEnd) {
-                $query->where(function ($inner) use ($rangeStart, $rangeEnd) {
-                    $inner->where('range_start', '<=', $rangeStart)
-                        ->where(function ($rangeQuery) use ($rangeStart) {
-                            $rangeQuery->whereNull('range_end')
-                                ->orWhere('range_end', '>=', $rangeStart);
-                        });
-                })->orWhere(function ($inner) use ($rangeEnd) {
-                    if ($rangeEnd === null) {
-                        $inner->whereNotNull('id');
-                        return;
-                    }
-
-                    $inner->where('range_start', '<=', $rangeEnd)
-                        ->where(function ($rangeQuery) use ($rangeEnd) {
-                            $rangeQuery->whereNull('range_end')
-                                ->orWhere('range_end', '>=', $rangeEnd);
-                        });
-                });
-            })
             ->where(function ($query) use ($effectiveFrom, $effectiveTo) {
                 $query->where(function ($inner) use ($effectiveFrom, $effectiveTo) {
                     $inner->where('effective_from', '<=', $effectiveFrom)
@@ -118,14 +96,12 @@ class BillingProfileService
             ->select([
                 'id',
                 'uuid',
+                'tenant_id',
                 'billing_profile_id',
-                'range_start',
-                'range_end',
-                'price_cents',
+                'unit_price_cents',
                 'currency',
                 'effective_from',
                 'effective_to',
-                'sort_order',
                 'status',
             ])
             ->where('billing_profile_id', $profile->id)
@@ -136,7 +112,7 @@ class BillingProfileService
                     ->orWhere('effective_to', '>=', $date);
             })
             ->orderByDesc('effective_from')
-            ->orderByDesc('range_start')
+            ->orderByDesc('id')
             ->get();
     }
 
@@ -145,12 +121,6 @@ class BillingProfileService
      */
     public function matchingRuleFromCollection(Collection $rules, int $registeredUnits): ?BillingRule
     {
-        return $rules->first(function (BillingRule $rule) use ($registeredUnits) {
-            if ($rule->range_start > $registeredUnits) {
-                return false;
-            }
-
-            return $rule->range_end === null || $rule->range_end >= $registeredUnits;
-        });
+        return $rules->first();
     }
 }

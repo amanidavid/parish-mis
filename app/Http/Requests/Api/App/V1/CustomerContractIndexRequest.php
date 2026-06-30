@@ -19,6 +19,7 @@ class CustomerContractIndexRequest extends FormRequest
             'customer_uuid' => ['nullable', 'uuid'],
             'unit_uuid' => ['nullable', 'uuid'],
             'status' => ['nullable', 'in:draft,active,expired,terminated'],
+            'payment_status' => ['nullable', 'in:unpaid,partial,paid'],
             'contract_number' => ['nullable', 'string', 'max:120'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
