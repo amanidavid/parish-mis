@@ -14,7 +14,6 @@ use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertySubscriptionAccessService;
-use App\Services\V1\Billing\SubscriptionUsageAdjustmentService;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
 use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
@@ -32,7 +31,6 @@ class UnitController extends Controller
      */
     public function __construct(
         private SubscriptionService $subscriptionService,
-        private SubscriptionUsageAdjustmentService $subscriptionUsageAdjustmentService,
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private PropertyAssignmentAccessService $propertyAssignmentAccessService,
@@ -106,7 +104,7 @@ class UnitController extends Controller
     public function store(StoreUnitRequest $request)
     {
         $this->authorize('create', Unit::class);
-        $this->prepareInventoryMutation(true);
+        $this->prepareInventoryMutation();
 
         $data = $request->validated();
         $propertyFloor = $this->resolveModelByUuid(PropertyFloor::class, $data['property_floor_uuid']);
@@ -137,6 +135,8 @@ class UnitController extends Controller
         $unit = DB::transaction(fn () => Unit::query()->create([
             'property_floor_id' => $propertyFloor->id,
             'unit_number' => trim($data['unit_number']),
+            'monthly_rent_amount' => $data['monthly_rent_amount'],
+            'rent_currency' => strtoupper($data['rent_currency'] ?? 'TZS'),
             'status' => $data['status'] ?? 'vacant',
         ]));
 
@@ -185,10 +185,6 @@ class UnitController extends Controller
             return $error;
         }
 
-        if ($originalPropertyId !== (int) $propertyFloor->property_id) {
-            $this->captureUsageBaseline();
-        }
-
         $unitNumber = isset($data['unit_number']) ? trim($data['unit_number']) : $unit->unit_number;
         $exists = Unit::query()
             ->where('property_floor_id', $propertyFloor->id)
@@ -204,6 +200,8 @@ class UnitController extends Controller
             $unit->fill([
                 'property_floor_id' => $propertyFloor->id,
                 'unit_number' => $unitNumber,
+                'monthly_rent_amount' => $data['monthly_rent_amount'] ?? $unit->monthly_rent_amount,
+                'rent_currency' => isset($data['rent_currency']) ? strtoupper($data['rent_currency']) : $unit->rent_currency,
                 'status' => $data['status'] ?? $unit->status,
             ])->save();
         });
@@ -221,7 +219,7 @@ class UnitController extends Controller
     public function destroy(Unit $unit)
     {
         $this->authorize('delete', $unit);
-        $this->prepareInventoryMutation(true);
+        $this->prepareInventoryMutation();
         $property = $unit->loadMissing('propertyFloor.property')->propertyFloor->property;
 
         if ($error = $this->assertPropertyAllowsOperationalMutation($property, 'units')) {
@@ -244,7 +242,6 @@ class UnitController extends Controller
 
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->syncWorkspaceUsage($tenant);
-            $this->subscriptionUsageAdjustmentService->syncPendingAdjustment($tenant);
             if ($propertyIds !== []) {
                 $this->workspacePropertyRegistryService->syncPropertyIds($tenant, $propertyIds);
             }
@@ -254,27 +251,12 @@ class UnitController extends Controller
     /**
      * Prepare inventory mutation.
      */
-    private function prepareInventoryMutation(bool $captureUsageBaseline = false): void
+    private function prepareInventoryMutation(): void
     {
         $tenant = request()->attributes->get('tenant');
 
         if ($tenant instanceof Tenant) {
             $this->subscriptionService->assertWorkspaceAllowsPropertyScopedMutation($tenant);
-            if ($captureUsageBaseline) {
-                $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
-            }
-        }
-    }
-
-    /**
-     * Capture usage baseline.
-     */
-    private function captureUsageBaseline(): void
-    {
-        $tenant = request()->attributes->get('tenant');
-
-        if ($tenant instanceof Tenant) {
-            $this->subscriptionUsageAdjustmentService->prepareInventoryMutation($tenant);
         }
     }
 

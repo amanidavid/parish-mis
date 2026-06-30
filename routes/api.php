@@ -51,6 +51,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('top-billing-rules', [AdminAnalyticsController::class, 'topBillingRules']);
                 });
                 Route::get('billing-rules', [BillingProfileController::class, 'indexRules']);
+                Route::post('billing-rules', [BillingProfileController::class, 'storeRuleDirect']);
                 Route::get('billing-profiles', [BillingProfileController::class, 'index']);
                 Route::post('billing-profiles', [BillingProfileController::class, 'store']);
                 Route::get('billing-profiles/{billingProfile}', [BillingProfileController::class, 'show']);
@@ -58,6 +59,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('billing-profiles/{billingProfile}/rules', [BillingProfileController::class, 'rules']);
                 Route::post('billing-profiles/{billingProfile}/rules', [BillingProfileController::class, 'storeRule']);
                 Route::patch('billing-rules/{billingRule}', [BillingProfileController::class, 'updateRule']);
+                Route::delete('billing-rules/{billingRule}', [BillingProfileController::class, 'destroyRule']);
                 Route::get('tenants', [TenantController::class, 'index']);
                 Route::post('tenants', [TenantController::class, 'store']);
                 Route::get('tenants/{tenant}', [TenantController::class, 'show']);
@@ -169,6 +171,7 @@ Route::prefix('v1')->group(function () {
                 });
                 Route::apiResource('customers', CustomerController::class);
                 Route::get('customer-contracts/next-number', [CustomerContractController::class, 'nextNumber']);
+                Route::post('customer-contracts/{customerContract}/payments', [CustomerContractController::class, 'recordPayment']);
                 Route::apiResource('customer-contracts', CustomerContractController::class);
                 Route::apiResource('staff-property-assignments', StaffPropertyAssignmentController::class);
                 Route::apiResource('staff-users', TenantUserController::class)

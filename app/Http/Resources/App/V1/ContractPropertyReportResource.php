@@ -19,7 +19,9 @@ class ContractPropertyReportResource extends JsonResource
             'terminated_contracts_count' => (int) $this->terminated_contracts_count,
             'draft_contracts_count' => (int) $this->draft_contracts_count,
             'total_contract_amount' => (float) $this->total_contract_amount,
-            'active_contract_amount' => (float) $this->active_contract_amount,
+            'revenue_collected' => (float) ($this->revenue_collected ?? 0),
+            'outstanding_contract_balance' => (float) ($this->outstanding_contract_balance ?? 0),
+            'remaining_debts_of_partial_paid_contracts' => (float) ($this->remaining_debts_of_partial_paid_contracts ?? 0),
             'latest_end_date' => $this->latest_end_date,
         ];
     }

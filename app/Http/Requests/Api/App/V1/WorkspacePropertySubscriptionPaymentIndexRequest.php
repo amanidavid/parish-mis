@@ -15,7 +15,6 @@ class WorkspacePropertySubscriptionPaymentIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'billing_rule_uuid' => ['nullable', 'uuid'],
             'search' => ['nullable', 'string', 'max:120'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],

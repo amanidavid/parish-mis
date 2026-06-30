@@ -12,10 +12,10 @@ class ContractChartBucketResource extends JsonResource
         return [
             'bucket_key' => $this['bucket_key'],
             'bucket_label' => $this['bucket_label'],
-            'contracts_count' => (int) $this['contracts_count'],
-            'recognized_contracts_count' => (int) $this['recognized_contracts_count'],
-            'total_contract_amount' => (float) $this['total_contract_amount'],
-            'recognized_contract_amount' => (float) $this['recognized_contract_amount'],
+            'contracts_count' => (int) ($this['contracts_count'] ?? 0),
+            'gross_collected_amount' => (float) ($this['gross_collected_amount'] ?? 0),
+            'refund_amount' => (float) ($this['refund_amount'] ?? 0),
+            'revenue_collected' => (float) ($this['revenue_collected'] ?? 0),
         ];
     }
 }

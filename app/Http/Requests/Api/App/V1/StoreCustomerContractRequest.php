@@ -19,10 +19,10 @@ class StoreCustomerContractRequest extends FormRequest
             'customer_uuid' => ['required', 'uuid'],
             'unit_uuid' => ['required', 'uuid'],
             'start_date' => ['required', 'date'],
-            'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
-            'amount' => ['required', 'numeric', 'min:0'],
-            'currency' => ['nullable', 'string', 'size:3'],
-            'status' => ['nullable', 'in:draft,active,expired,terminated'],
+            'contract_months' => ['required', 'integer', 'min:1', 'max:120'],
+            'initial_amount_paid' => ['nullable', 'numeric', 'min:0'],
+            'payment_date' => ['nullable', 'date'],
+            'status' => ['nullable', 'in:draft,active'],
             'notes' => ['nullable', 'string'],
         ];
     }
@@ -36,12 +36,13 @@ class StoreCustomerContractRequest extends FormRequest
             'unit_uuid.uuid' => 'The selected unit is invalid.',
             'start_date.required' => 'Enter the contract start date.',
             'start_date.date' => 'The contract start date is not a valid date.',
-            'end_date.date' => 'The contract end date is not a valid date.',
-            'end_date.after_or_equal' => 'The contract end date must be the same as or after the start date.',
-            'amount.required' => 'Enter the contract amount.',
-            'amount.numeric' => 'The contract amount must be a valid number.',
-            'amount.min' => 'The contract amount cannot be less than zero.',
-            'currency.size' => 'Currency must be a valid 3-letter code.',
+            'contract_months.required' => 'Enter the contract months before saving the contract.',
+            'contract_months.integer' => 'Contract months must be a whole number.',
+            'contract_months.min' => 'Contract months must be at least one month.',
+            'contract_months.max' => 'Contract months cannot exceed 120 months.',
+            'initial_amount_paid.numeric' => 'Initial amount paid must be a valid number.',
+            'initial_amount_paid.min' => 'Initial amount paid cannot be less than zero.',
+            'payment_date.date' => 'The payment date is not a valid date.',
             'status.in' => 'Choose a valid contract status.',
         ];
     }
@@ -53,7 +54,7 @@ class StoreCustomerContractRequest extends FormRequest
                 $validator,
                 $this->input('status', 'draft'),
                 $this->input('start_date'),
-                $this->input('end_date')
+                null
             );
         });
     }
@@ -71,22 +72,6 @@ class StoreCustomerContractRequest extends FormRequest
 
         if ($status === 'draft' && $startDate < $today) {
             $validator->errors()->add('start_date', 'Draft contracts can only start today or on a future date.');
-        }
-
-        if ($status === 'active' && $endDate !== null && $endDate < $today) {
-            $validator->errors()->add('end_date', 'Active contracts cannot use a past end date. Change the status to expired or terminated instead.');
-        }
-
-        if ($status === 'expired') {
-            if ($endDate === null) {
-                $validator->errors()->add('end_date', 'Expired contracts must have an end date before today.');
-
-                return;
-            }
-
-            if ($endDate >= $today) {
-                $validator->errors()->add('end_date', 'Expired contracts must use an end date before today.');
-            }
         }
     }
 }

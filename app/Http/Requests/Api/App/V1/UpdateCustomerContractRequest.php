@@ -21,10 +21,12 @@ class UpdateCustomerContractRequest extends FormRequest
             'unit_uuid' => ['sometimes', 'nullable', 'uuid'],
             'contract_number' => ['sometimes', 'string', 'min:1', 'max:120'],
             'start_date' => ['sometimes', 'date'],
-            'end_date' => ['sometimes', 'nullable', 'date'],
-            'amount' => ['sometimes', 'numeric', 'min:0'],
-            'currency' => ['sometimes', 'string', 'size:3'],
+            'contract_months' => ['sometimes', 'integer', 'min:1', 'max:120'],
+            'additional_amount_paid' => ['sometimes', 'numeric', 'min:0.01'],
+            'payment_date' => ['sometimes', 'date'],
             'status' => ['sometimes', 'in:draft,active,expired,terminated'],
+            'termination_date' => ['sometimes', 'nullable', 'date'],
+            'termination_reason' => ['sometimes', 'nullable', 'string'],
             'notes' => ['sometimes', 'nullable', 'string'],
         ];
     }
@@ -35,11 +37,14 @@ class UpdateCustomerContractRequest extends FormRequest
             'customer_uuid.uuid' => 'The selected customer is invalid.',
             'unit_uuid.uuid' => 'The selected unit is invalid.',
             'start_date.date' => 'The contract start date is not a valid date.',
-            'end_date.date' => 'The contract end date is not a valid date.',
-            'amount.numeric' => 'The contract amount must be a valid number.',
-            'amount.min' => 'The contract amount cannot be less than zero.',
-            'currency.size' => 'Currency must be a valid 3-letter code.',
+            'contract_months.integer' => 'Contract months must be a whole number.',
+            'contract_months.min' => 'Contract months must be at least one month.',
+            'contract_months.max' => 'Contract months cannot exceed 120 months.',
+            'additional_amount_paid.numeric' => 'Additional amount paid must be a valid number.',
+            'additional_amount_paid.min' => 'Additional amount paid must be greater than zero.',
+            'payment_date.date' => 'The payment date is not a valid date.',
             'status.in' => 'Choose a valid contract status.',
+            'termination_date.date' => 'The termination date is not a valid date.',
         ];
     }
 
@@ -47,21 +52,21 @@ class UpdateCustomerContractRequest extends FormRequest
     {
         $validator->after(function (Validator $validator) {
             /** @var CustomerContract|null $contract */
-            $contract = $this->route('customer_contract');
+            $contract = $this->route('customerContract');
 
             $status = $this->input('status') ?? $contract?->status ?? 'draft';
             $startDate = $this->input('start_date') ?? $contract?->start_date?->toDateString();
-            $endDate = $this->input('end_date');
+            $terminationDate = $this->input('termination_date') ?? $contract?->termination_date?->toDateString();
 
-            if ($endDate === null && !$this->has('end_date')) {
-                $endDate = $contract?->end_date?->toDateString();
+            if ($terminationDate !== null && $startDate !== null && $terminationDate < $startDate) {
+                $validator->errors()->add('termination_date', 'Termination date must be the same as or after the contract start date.');
             }
 
-            if ($startDate && $endDate && $endDate < $startDate) {
-                $validator->errors()->add('end_date', 'The contract end date must be the same as or after the start date.');
+            if ($status === 'terminated' && blank($terminationDate)) {
+                $validator->errors()->add('termination_date', 'Provide the termination date when marking a contract as terminated.');
             }
 
-            $this->validateStatusDateRules($validator, $status, $startDate, $endDate);
+            $this->validateStatusDateRules($validator, $status, $startDate, null);
         });
     }
 
@@ -80,20 +85,5 @@ class UpdateCustomerContractRequest extends FormRequest
             $validator->errors()->add('start_date', 'Draft contracts can only start today or on a future date.');
         }
 
-        if ($status === 'active' && $endDate !== null && $endDate < $today) {
-            $validator->errors()->add('end_date', 'Active contracts cannot use a past end date. Change the status to expired or terminated instead.');
-        }
-
-        if ($status === 'expired') {
-            if ($endDate === null) {
-                $validator->errors()->add('end_date', 'Expired contracts must have an end date before today.');
-
-                return;
-            }
-
-            if ($endDate >= $today) {
-                $validator->errors()->add('end_date', 'Expired contracts must use an end date before today.');
-            }
-        }
     }
 }

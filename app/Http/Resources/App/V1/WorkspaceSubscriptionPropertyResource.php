@@ -15,7 +15,7 @@ class WorkspaceSubscriptionPropertyResource extends ApiJsonResource
             'status' => $this->status,
             'subscription_status' => $this->subscription_status ?? null,
             'registered_units' => (int) $this->registered_units,
-            'matched_rule' => $this->matched_rule,
+            'workspace_billing_rule' => $this->workspace_billing_rule,
             'estimated_price_cents' => (int) ($this->estimated_price_cents ?? 0),
             'created_at' => $this->formatTimestamp($this->created_at),
         ];

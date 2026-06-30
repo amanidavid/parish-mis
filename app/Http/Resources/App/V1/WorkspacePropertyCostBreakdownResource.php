@@ -26,20 +26,19 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
         $currentPeriodStartsOn = optional($subscription?->current_period_starts_on)->toDateString();
         $currentPeriodEndsOn = optional($subscription?->current_period_ends_on)->toDateString();
         $billingRule = $subscription?->billingRule;
-        $billingProfile = $billingRule?->profile;
         $monthlyPriceCents = (int) (
             $activePayment?->monthly_price_cents
             ?? $latestPayment?->monthly_price_cents
-            ?? $billingRule?->price_cents
+            ?? (($billingRule?->unit_price_cents ?? 0) * (int) $this->current_registered_units_total)
             ?? 0
         );
         $currency = $activePayment?->currency
             ?? $latestPayment?->currency
-            ?? $billingProfile?->currency
+            ?? $billingRule?->currency
             ?? 'TZS';
         $paymentsCount = (int) ($this->payments_count ?? 0);
         $totalPaidAmountCents = (int) ($this->total_paid_amount_cents ?? 0);
-        $unitRange = $this->formatUnitRange($billingRule?->range_start, $billingRule?->range_end);
+        $unitPriceCents = (int) ($billingRule?->unit_price_cents ?? 0);
 
         return [
             'uuid' => $this->uuid,
@@ -55,10 +54,9 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
             'total_paid_amount_cents' => $totalPaidAmountCents,
             'payments_count' => $paymentsCount,
             'monthly_price_cents' => $monthlyPriceCents,
+            'workspace_unit_price_cents' => $unitPriceCents,
             'currency' => $currency,
-            'billing_interval' => $billingProfile?->billing_interval ?? 'monthly',
-            'billing_profile_name' => $billingProfile?->name ?? 'Property subscription',
-            'unit_range' => $unitRange,
+            'billing_interval' => 'monthly',
             'activated_on' => optional($subscription?->activated_on)->toDateString(),
             'last_paid_on' => optional($subscription?->last_paid_on)->toDateString(),
             'expired_on' => optional($subscription?->expired_on)->toDateString(),
@@ -69,12 +67,12 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
                 'total_paid_amount_cents' => $totalPaidAmountCents,
                 'payments_count' => $paymentsCount,
                 'monthly_price_cents' => $monthlyPriceCents,
+                'workspace_unit_price_cents' => $unitPriceCents,
                 'currency' => $currency,
             ],
             'subscription_details' => [
-                'billing_profile_name' => $billingProfile?->name ?? 'Property subscription',
-                'billing_interval' => $billingProfile?->billing_interval ?? 'monthly',
-                'unit_range' => $unitRange,
+                'workspace_unit_price_cents' => $unitPriceCents,
+                'billing_interval' => 'monthly',
                 'activated_on' => optional($subscription?->activated_on)->toDateString(),
                 'last_paid_on' => optional($subscription?->last_paid_on)->toDateString(),
                 'expired_on' => optional($subscription?->expired_on)->toDateString(),
@@ -91,15 +89,11 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
                 'expired_on' => optional($subscription->expired_on)->toDateString(),
                 'billing_rule' => $subscription->billingRule ? [
                     'uuid' => $subscription->billingRule->uuid,
-                    'range_start' => (int) $subscription->billingRule->range_start,
-                    'range_end' => $subscription->billingRule->range_end !== null ? (int) $subscription->billingRule->range_end : null,
-                    'price_cents' => (int) $subscription->billingRule->price_cents,
-                    'currency' => $subscription->billingRule->profile?->currency,
-                    'billing_profile' => $subscription->billingRule->profile ? [
-                        'uuid' => $subscription->billingRule->profile->uuid,
-                        'name' => $subscription->billingRule->profile->name,
-                        'billing_interval' => $subscription->billingRule->profile->billing_interval,
-                    ] : null,
+                    'unit_price_cents' => (int) $subscription->billingRule->unit_price_cents,
+                    'currency' => $subscription->billingRule->currency,
+                    'effective_from' => $subscription->billingRule->effective_from?->toDateString(),
+                    'effective_to' => $subscription->billingRule->effective_to?->toDateString(),
+                    'scope' => 'global_default',
                 ] : null,
             ] : [
                 'status' => PropertySubscription::STATUS_UNSUBSCRIBED,
@@ -139,6 +133,8 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
         return [
             'uuid' => $payment->uuid,
             'months_paid' => (int) $payment->months_paid,
+            'unit_count_at_payment' => (int) $payment->unit_count_at_payment,
+            'unit_price_cents_at_payment' => (int) $payment->unit_price_cents_at_payment,
             'payment_date' => optional($payment->payment_date)->toDateString(),
             'coverage_starts_on' => optional($payment->coverage_starts_on)->toDateString(),
             'coverage_ends_on' => optional($payment->coverage_ends_on)->toDateString(),
@@ -148,15 +144,11 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
             'reference_number' => $payment->reference_number,
             'billing_rule' => $payment->billingRule ? [
                 'uuid' => $payment->billingRule->uuid,
-                'range_start' => (int) $payment->billingRule->range_start,
-                'range_end' => $payment->billingRule->range_end !== null ? (int) $payment->billingRule->range_end : null,
-                'price_cents' => (int) $payment->billingRule->price_cents,
-                'currency' => $payment->billingRule->profile?->currency ?? $payment->currency,
-                'billing_profile' => $payment->billingRule->profile ? [
-                    'uuid' => $payment->billingRule->profile->uuid,
-                    'name' => $payment->billingRule->profile->name,
-                    'billing_interval' => $payment->billingRule->profile->billing_interval,
-                ] : null,
+                'unit_price_cents' => (int) $payment->billingRule->unit_price_cents,
+                'currency' => $payment->billingRule->currency ?? $payment->currency,
+                'effective_from' => $payment->billingRule->effective_from?->toDateString(),
+                'effective_to' => $payment->billingRule->effective_to?->toDateString(),
+                'scope' => 'global_default',
             ] : null,
         ];
     }
@@ -205,19 +197,6 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
         return $startsOn ?? $endsOn;
     }
 
-    private function formatUnitRange(?int $rangeStart, ?int $rangeEnd): ?string
-    {
-        if ($rangeStart === null) {
-            return null;
-        }
-
-        if ($rangeEnd === null) {
-            return $rangeStart.'+';
-        }
-
-        return $rangeStart.' - '.$rangeEnd;
-    }
-
     private function nextBillingPreview(): ?array
     {
         $preview = $this->next_billing_preview;
@@ -234,7 +213,6 @@ class WorkspacePropertyCostBreakdownResource extends ApiJsonResource
             'price_change_cents' => (int) ($preview['price_change_cents'] ?? 0),
             'currency' => $preview['currency'] ?? 'TZS',
             'has_price_change' => (bool) ($preview['has_price_change'] ?? false),
-            'units_exceed_current_rule' => (bool) ($preview['units_exceed_current_rule'] ?? false),
             'current_billing_rule' => $preview['current_billing_rule'] ?? null,
             'projected_billing_rule' => $preview['projected_billing_rule'] ?? null,
             'message' => $preview['message'] ?? null,

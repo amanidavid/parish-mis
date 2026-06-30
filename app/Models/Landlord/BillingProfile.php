@@ -18,6 +18,6 @@ class BillingProfile extends BaseModel
 
     public function rules(): HasMany
     {
-        return $this->hasMany(BillingRule::class)->orderBy('sort_order')->orderBy('range_start');
+        return $this->hasMany(BillingRule::class)->orderByDesc('effective_from')->orderByDesc('created_at');
     }
 }

@@ -9,26 +9,19 @@ class BillingRuleResource extends ApiJsonResource
 {
     public function toArray(Request $request): array
     {
-        $rangeEnd = $this->range_end !== null ? (int) $this->range_end : null;
-        $unitRangeLabel = $rangeEnd === null
-            ? sprintf('%d+ units', (int) $this->range_start)
-            : sprintf('%d-%d units', (int) $this->range_start, $rangeEnd);
-        $formattedPrice = $this->formatMoneyFromCents((int) $this->price_cents, $this->currency);
+        $formattedPrice = $this->formatMoneyFromCents((int) $this->unit_price_cents, $this->currency);
+        $ruleName = 'Default unit price';
 
         return [
             'uuid' => $this->uuid,
-            'range_start' => $this->range_start,
-            'range_end' => $rangeEnd,
-            'price_cents' => $this->price_cents,
+            'unit_price_cents' => (int) $this->unit_price_cents,
             'currency' => $this->currency,
-            'price_formatted' => $formattedPrice,
+            'unit_price_formatted' => $formattedPrice,
             'effective_from' => $this->effective_from?->toDateString(),
             'effective_to' => $this->effective_to?->toDateString(),
-            'sort_order' => $this->sort_order,
             'status' => $this->status,
-            'unit_range_label' => $unitRangeLabel,
-            'display_name' => sprintf('%s - %s / month', $unitRangeLabel, $formattedPrice),
-            'name' => sprintf('%s - %s / month', $unitRangeLabel, $formattedPrice),
+            'display_name' => sprintf('%s - %s per unit / month', $ruleName, $formattedPrice),
+            'name' => sprintf('%s - %s per unit / month', $ruleName, $formattedPrice),
             'billing_profile' => $this->whenLoaded('profile', fn () => [
                 'uuid' => $this->profile?->uuid,
                 'name' => $this->profile?->name,
