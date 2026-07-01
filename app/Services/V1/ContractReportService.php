@@ -93,7 +93,12 @@ class ContractReportService
         $contractsQuery = $this->tenantTable('customer_contracts')
             ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
             ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
-            ->whereBetween('customer_contracts.start_date', [$startDate, $endDate]);
+            ->where('customer_contracts.start_date', '<=', $endDate)
+            ->where(function (QueryBuilder $innerQuery) use ($startDate) {
+                $innerQuery
+                    ->whereNull('customer_contracts.end_date')
+                    ->orWhere('customer_contracts.end_date', '>=', $startDate);
+            });
 
         $contractsQuery = $this->applyPropertyScopeToColumn($contractsQuery, $scope, 'property_floors.property_id');
         $contractsQuery = $this->applyContractPropertyFilter($contractsQuery, $filters);
@@ -542,7 +547,7 @@ class ContractReportService
 
         return [
             $today->copy()->subMonthsNoOverflow($months - 1)->startOfMonth()->toDateString(),
-            $today->copy()->endOfDay()->toDateString(),
+            $today->copy()->endOfMonth()->toDateString(),
             $range,
         ];
     }
