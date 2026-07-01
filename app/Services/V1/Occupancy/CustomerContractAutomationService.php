@@ -64,46 +64,34 @@ class CustomerContractAutomationService
             $timestamp = now();
 
             return $connection->transaction(function () use ($connection, $today, $timestamp) {
-                $expiredContractRows = $connection->table('customer_contracts')
-                    ->select(['customer_id', 'unit_id'])
-                    ->where('status', 'active')
-                    ->whereNotNull('end_date')
-                    ->where('end_date', '<', $today)
-                    ->get();
+                $contractsExpiringToday = $this->contractsExpiringBeforeDate($connection, $today)->get();
+                $draftContractsReadyForActivation = $this->draftContractsReadyForActivation($connection, $today)->get();
 
-                $startingTodayRows = $connection->table('customer_contracts')
-                    ->select(['customer_id', 'unit_id'])
-                    ->where('status', 'active')
-                    ->where('start_date', '=', $today)
-                    ->where(function ($query) use ($today) {
-                        $query
-                            ->whereNull('end_date')
-                            ->orWhere('end_date', '>=', $today);
-                    })
-                    ->get();
-
-                $affectedCustomerIds = $expiredContractRows
+                $affectedCustomerIds = $contractsExpiringToday
                     ->pluck('customer_id')
-                    ->merge($startingTodayRows->pluck('customer_id'))
+                    ->merge($draftContractsReadyForActivation->pluck('customer_id'))
                     ->filter()
                     ->map(fn ($id) => (int) $id)
                     ->unique()
                     ->values()
                     ->all();
 
-                $affectedUnitIds = $expiredContractRows
+                $affectedUnitIds = $contractsExpiringToday
                     ->pluck('unit_id')
-                    ->merge($startingTodayRows->pluck('unit_id'))
+                    ->merge($draftContractsReadyForActivation->pluck('unit_id'))
                     ->filter()
                     ->map(fn ($id) => (int) $id)
                     ->unique()
                     ->values()
                     ->all();
 
-                $expiredContracts = $connection->table('customer_contracts')
-                    ->where('status', 'active')
-                    ->whereNotNull('end_date')
-                    ->where('end_date', '<', $today)
+                $activatedDraftContracts = $this->draftContractsReadyForActivation($connection, $today)
+                    ->update([
+                        'status' => 'active',
+                        'updated_at' => $timestamp,
+                    ]);
+
+                $expiredContracts = $this->contractsExpiringBeforeDate($connection, $today)
                     ->update([
                         'status' => 'expired',
                         'updated_at' => $timestamp,
@@ -112,9 +100,37 @@ class CustomerContractAutomationService
                 $unitStatusUpdates = $this->customerContractRuleService->syncUnitOccupancyStatuses($affectedUnitIds);
                 $customerStatusUpdates = $this->customerContractRuleService->syncCustomerStatuses($affectedCustomerIds);
 
-                return $expiredContracts + $unitStatusUpdates + $customerStatusUpdates;
+                return $activatedDraftContracts + $expiredContracts + $unitStatusUpdates + $customerStatusUpdates;
             });
         });
+    }
+
+    /**
+     * Draft contracts whose start date has been reached and can now become active.
+     */
+    private function draftContractsReadyForActivation(\Illuminate\Database\Connection $connection, string $today)
+    {
+        return $connection->table('customer_contracts')
+            ->select(['customer_id', 'unit_id'])
+            ->where('status', 'draft')
+            ->where('start_date', '<=', $today)
+            ->where(function ($query) use ($today) {
+                $query
+                    ->whereNull('end_date')
+                    ->orWhere('end_date', '>=', $today);
+            });
+    }
+
+    /**
+     * Active contracts that have passed their end date and must become expired.
+     */
+    private function contractsExpiringBeforeDate(\Illuminate\Database\Connection $connection, string $today)
+    {
+        return $connection->table('customer_contracts')
+            ->select(['customer_id', 'unit_id'])
+            ->where('status', 'active')
+            ->whereNotNull('end_date')
+            ->where('end_date', '<', $today);
     }
 
     /**

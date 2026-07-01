@@ -152,10 +152,10 @@ Artisan::command('contracts:sync-statuses {--force}', function () {
 
     $run = $service->runTaskByKey(AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC, $force);
 
-    $this->info($run?->message ?? 'Customer contract status sync completed.');
+    $this->info($run?->message ?? 'Customer contract lifecycle sync completed.');
 
     return self::SUCCESS;
-})->purpose('Update expired customer contracts and refresh unit occupancy across ready tenant databases');
+})->purpose('Activate due draft contracts, expire ended contracts, and refresh occupancy across ready tenant databases');
 
 Artisan::command('contracts:send-alerts {--tenant=} {--chunk=20}', function () {
     $tenantUuid = $this->option('tenant');
