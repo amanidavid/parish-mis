@@ -178,16 +178,44 @@ class PropertySubscriptionAutomationService
     private function ensureDefaultTasks(): void
     {
         $taskDefinitions = $this->defaultTasks();
-        $existingTaskKeys = AutomationTaskSetting::query()
+        $existingTasks = AutomationTaskSetting::query()
             ->whereIn('task_key', array_keys($taskDefinitions))
-            ->pluck('task_key')
-            ->all();
+            ->get()
+            ->keyBy('task_key');
+
+        $existingTaskKeys = $existingTasks->keys()->all();
 
         foreach (array_diff(array_keys($taskDefinitions), $existingTaskKeys) as $taskKey) {
             AutomationTaskSetting::query()->create([
                 'task_key' => $taskKey,
                 ...$taskDefinitions[$taskKey],
             ]);
+        }
+
+        foreach ($existingTasks as $taskKey => $taskSetting) {
+            $definition = $taskDefinitions[$taskKey] ?? null;
+
+            if ($definition === null) {
+                continue;
+            }
+
+            $updates = [];
+
+            if ($taskSetting->name !== $definition['name']) {
+                $updates['name'] = $definition['name'];
+            }
+
+            if ($taskSetting->description !== $definition['description']) {
+                $updates['description'] = $definition['description'];
+            }
+
+            if (($taskSetting->meta ?? []) !== ($definition['meta'] ?? [])) {
+                $updates['meta'] = $definition['meta'] ?? [];
+            }
+
+            if ($updates !== []) {
+                $taskSetting->fill($updates)->save();
+            }
         }
     }
 
@@ -214,8 +242,8 @@ class PropertySubscriptionAutomationService
 
         return $this->defaultTaskDefinitions = [
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => [
-                'name' => 'Customer Contract Expiry Sync',
-                'description' => 'Automatically expires ended customer contracts and refreshes unit occupancy across ready workspaces.',
+                'name' => 'Customer Contract Lifecycle Sync',
+                'description' => 'Automatically activates due draft contracts, expires ended contracts, and refreshes occupancy across ready workspaces.',
                 'enabled' => true,
                 'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
                 'interval_minutes' => 15,
@@ -263,8 +291,8 @@ class PropertySubscriptionAutomationService
     {
         return match ($taskKey) {
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $rowsAffected > 0
-                ? sprintf('Automation task completed successfully. %d customer contract, unit, and customer status rows were updated.', $rowsAffected)
-                : 'Automation task completed successfully. No customer contract, unit, or customer status rows required updating.',
+                ? sprintf('Customer contract lifecycle sync completed successfully. %d contract, unit, and customer status rows were updated.', $rowsAffected)
+                : 'Customer contract lifecycle sync completed successfully. No draft activations, expiries, or occupancy updates were required.',
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => $rowsAffected > 0
                 ? sprintf('Automation task completed successfully. %d property subscription rows were updated.', $rowsAffected)
                 : 'Automation task completed successfully. No property subscription rows required updating.',
@@ -286,7 +314,7 @@ class PropertySubscriptionAutomationService
         return match ($taskKey) {
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => 'Contract alerts could not be processed at the moment. Please check the notification configuration and try again.',
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_ALERTS => 'Property subscription alerts could not be processed at the moment. Please check the notification configuration and try again.',
-            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => 'Customer contract expiry sync could not be completed at the moment. Please try again shortly.',
+            AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => 'Customer contract lifecycle sync could not be completed at the moment. Please try again shortly.',
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => 'Property subscription expiry sync could not be completed at the moment. Please try again shortly.',
             default => 'Automation task could not be completed at the moment. Please try again shortly.',
         };

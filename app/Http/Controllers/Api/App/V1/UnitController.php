@@ -93,6 +93,8 @@ class UnitController extends Controller
             $query->where('unit_number', 'like', $filters['unit_number'].'%');
         }
 
+        $query->orderBy('created_at')->orderBy('id');
+
         $units = $query->paginate((int) ($filters['per_page'] ?? 15));
 
         return ApiResponse::resource(UnitResource::collection($units), ApiMessages::listRetrieved('units'));
