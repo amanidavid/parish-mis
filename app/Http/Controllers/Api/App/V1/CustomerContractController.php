@@ -24,6 +24,7 @@ use App\Services\V1\PropertyAssignmentAccessService;
 use App\Services\V1\SubscriptionService;
 use App\Support\ApiMessages;
 use App\Support\ApiResponse;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -224,59 +225,79 @@ class CustomerContractController extends Controller
             return ApiResponse::error('Contract period conflict', ['unit_uuid' => ['This unit already has an overlapping contract period']], 422);
         }
 
-        $contract = DB::transaction(function () use ($customer, $unitId, $data, $unit) {
-            $contractMonths = (int) $data['contract_months'];
-            $expectedTotal = $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $contractMonths);
-
-            $contract = CustomerContract::query()->create([
-                'customer_id' => $customer->id,
-                'unit_id' => $unitId,
-                'contract_number' => $this->generateContractNumber(
-                    (int) $unit->propertyFloor->property->id,
-                    (string) $data['start_date']
-                ),
-                'start_date' => $data['start_date'],
-                'end_date' => $this->financeService->calculateEndDate((string) $data['start_date'], $contractMonths),
-                'contract_months' => $contractMonths,
-                'unit_price_at_contract' => (float) $unit->monthly_rent_amount,
-                'amount' => $expectedTotal,
-                'expected_total_amount' => $expectedTotal,
-                'final_payable_amount' => $expectedTotal,
-                'currency' => strtoupper($unit->rent_currency ?? 'TZS'),
-                'status' => $data['status'] ?? 'draft',
-                'notes' => $data['notes'] ?? null,
-            ]);
-
-            if ((float) ($data['initial_amount_paid'] ?? 0) > 0) {
-                $this->financeService->recordPayment(
-                    $contract,
-                    (float) $data['initial_amount_paid'],
-                    $data['payment_date'] ?? $data['start_date'],
-                    'Initial contract payment.'
-                );
-            }
-
-            $contract = $this->financeService->syncContractFinancials($contract);
-
-            if ($contract->status === 'terminated' && $contract->termination_date) {
-                $contract = $this->financeService->terminateContract(
-                    $contract,
-                    $contract->termination_date->toDateString(),
-                    $contract->termination_reason
-                );
-            }
-
-            $this->ruleService->syncUnitOccupancyStatus($unitId);
-            $this->ruleService->syncCustomerStatuses([$customer->id]);
-
-            return $contract;
-        });
+        $contract = $this->createContractWithGeneratedNumber($customer, $unitId, $data, $unit);
 
         return ApiResponse::resource(
             new CustomerContractResource($contract->load(['customer.property', 'unit.propertyFloor.property', 'documents', 'transactions'])->loadCount('documents')),
             ApiMessages::created('customer contract'),
             201
         );
+    }
+
+    /**
+     * Create contract with a generated number that can recover from collisions.
+     */
+    private function createContractWithGeneratedNumber(Customer $customer, int $unitId, array $data, Unit $unit): CustomerContract
+    {
+        $maxAttempts = 3;
+
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            try {
+                return DB::transaction(function () use ($customer, $unitId, $data, $unit) {
+                    $contractMonths = (int) $data['contract_months'];
+                    $expectedTotal = $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $contractMonths);
+
+                    $contract = CustomerContract::query()->create([
+                        'customer_id' => $customer->id,
+                        'unit_id' => $unitId,
+                        'contract_number' => $this->generateContractNumber(
+                            (int) $unit->propertyFloor->property->id,
+                            (string) $data['start_date']
+                        ),
+                        'start_date' => $data['start_date'],
+                        'end_date' => $this->financeService->calculateEndDate((string) $data['start_date'], $contractMonths),
+                        'contract_months' => $contractMonths,
+                        'unit_price_at_contract' => (float) $unit->monthly_rent_amount,
+                        'amount' => $expectedTotal,
+                        'expected_total_amount' => $expectedTotal,
+                        'final_payable_amount' => $expectedTotal,
+                        'currency' => strtoupper($unit->rent_currency ?? 'TZS'),
+                        'status' => $data['status'] ?? 'draft',
+                        'notes' => $data['notes'] ?? null,
+                    ]);
+
+                    if ((float) ($data['initial_amount_paid'] ?? 0) > 0) {
+                        $this->financeService->recordPayment(
+                            $contract,
+                            (float) $data['initial_amount_paid'],
+                            $data['payment_date'] ?? $data['start_date'],
+                            'Initial contract payment.'
+                        );
+                    }
+
+                    $contract = $this->financeService->syncContractFinancials($contract);
+
+                    if ($contract->status === 'terminated' && $contract->termination_date) {
+                        $contract = $this->financeService->terminateContract(
+                            $contract,
+                            $contract->termination_date->toDateString(),
+                            $contract->termination_reason
+                        );
+                    }
+
+                    $this->ruleService->syncUnitOccupancyStatus($unitId);
+                    $this->ruleService->syncCustomerStatuses([$customer->id]);
+
+                    return $contract;
+                });
+            } catch (UniqueConstraintViolationException $exception) {
+                if (!$this->isContractNumberConstraintViolation($exception) || $attempt === $maxAttempts) {
+                    throw $exception;
+                }
+            }
+        }
+
+        throw new \RuntimeException('Unable to generate a unique contract number.');
     }
 
     /**
@@ -660,20 +681,37 @@ class CustomerContractController extends Controller
     {
         $year = Carbon::parse($startDate)->format('Y');
         $prefix = sprintf('CNT-%s-%d-', $year, $propertyId);
+        $nextSequence = $this->nextContractSequenceForPrefix($prefix);
 
-        $latestNumber = CustomerContract::query()
+        return sprintf('%s%d', $prefix, $nextSequence);
+    }
+
+    /**
+     * Get the next numeric sequence for the contract prefix.
+     */
+    private function nextContractSequenceForPrefix(string $prefix): int
+    {
+        $driver = DB::connection()->getDriverName();
+        $prefixLength = strlen($prefix) + 1;
+
+        $sequenceExpression = $driver === 'pgsql'
+            ? sprintf('CAST(SUBSTRING(contract_number FROM %d) AS INTEGER)', $prefixLength)
+            : sprintf('CAST(SUBSTRING(contract_number, %d) AS UNSIGNED)', $prefixLength);
+
+        $latestSequence = CustomerContract::query()
             ->where('contract_number', 'like', $prefix.'%')
-            ->orderByDesc('contract_number')
-            ->value('contract_number');
+            ->selectRaw(sprintf('MAX(%s) as latest_sequence', $sequenceExpression))
+            ->value('latest_sequence');
 
-        $nextSequence = 1;
+        return ((int) $latestSequence) + 1;
+    }
 
-        if (is_string($latestNumber)
-            && preg_match('/^CNT-\d{4}-\d+-(\d+)$/', $latestNumber, $matches) === 1) {
-            $nextSequence = ((int) $matches[1]) + 1;
-        }
-
-        return sprintf('CNT-%s-%d-%d', $year, $propertyId, $nextSequence);
+    /**
+     * Determine whether the unique constraint violation belongs to contract numbers.
+     */
+    private function isContractNumberConstraintViolation(UniqueConstraintViolationException $exception): bool
+    {
+        return str_contains($exception->getMessage(), 'customer_contracts_contract_number_unique');
     }
 
     private function changesPricingAnchorFields(array $data, CustomerContract $customerContract, int $resolvedUnitId): bool
