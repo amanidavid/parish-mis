@@ -282,10 +282,18 @@ class PropertySubAlertService
             return;
         }
 
-        Mail::raw($message, function ($mail) use ($address, $recipient, $subject) {
+        Mail::raw($this->formatEmailMessage($message), function ($mail) use ($address, $recipient, $subject) {
             $mail->to($address, (string) ($recipient['name'] ?? 'Recipient'))
                 ->subject($subject);
         });
+    }
+
+    private function formatEmailMessage(string $message): string
+    {
+        return "Hello,\n\n"
+            .$message
+            ."\n\nPlease do not reply to this email. This mailbox is not monitored."
+            ."\n\nRegards,\nZABA Team";
     }
 
     private function existingLogs(array $subscriptionIds, string $eventType): array
