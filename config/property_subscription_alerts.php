@@ -18,4 +18,8 @@ return [
             'enabled' => (bool) env('PROPERTY_SUB_ALERT_EMAIL_ENABLED', false),
         ],
     ],
+    'retry' => [
+        'max_attempts' => max((int) env('PROPERTY_SUB_ALERT_RETRY_MAX_ATTEMPTS', 3), 1),
+        'delay_ms' => max((int) env('PROPERTY_SUB_ALERT_RETRY_DELAY_MS', 500), 0),
+    ],
 ];

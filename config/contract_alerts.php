@@ -22,4 +22,8 @@ return [
             'enabled' => (bool) env('CONTRACT_ALERT_EMAIL_ENABLED', false),
         ],
     ],
+    'retry' => [
+        'max_attempts' => max((int) env('CONTRACT_ALERT_RETRY_MAX_ATTEMPTS', 3), 1),
+        'delay_ms' => max((int) env('CONTRACT_ALERT_RETRY_DELAY_MS', 500), 0),
+    ],
 ];
