@@ -4,6 +4,7 @@ namespace App\Services\V1\Billing;
 
 use App\Models\Landlord\PropertySubscription;
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\Concerns\DispatchesAlertsWithRetry;
 use App\Services\V1\Messaging\SmsService;
 use App\Services\V1\Occupancy\ContractAlertRecipientResolver;
 use App\Services\V1\TenantProvisioningService;
@@ -18,6 +19,8 @@ use Throwable;
 
 class PropertySubAlertService
 {
+    use DispatchesAlertsWithRetry;
+
     private const EVENT_EXPIRING_SOON = 'expiring_soon';
     private const EVENT_EXPIRES_TODAY = 'expires_today';
 
@@ -138,22 +141,42 @@ class PropertySubAlertService
                                 continue;
                             }
 
-                            $status = 'success';
-                            $error = null;
-
-                            try {
+                            $result = $this->dispatchAlertWithRetry(function () use (
+                                $channel,
+                                $address,
+                                $subject,
+                                $message,
+                                $recipient,
+                                $subscription,
+                                $eventType
+                            ): void {
                                 $this->dispatchChannel($channel, $address, $subject, $message, $recipient, $subscription, $eventType);
+                            }, 'property_subscription_alerts');
+
+                            if ($result['status'] === 'success') {
                                 $sentAlerts++;
-                            } catch (Throwable $exception) {
-                                $status = 'failed';
-                                $error = $exception->getMessage();
                             }
 
                             $existingUuid = $existingLogs[$logKey]['uuid'] ?? null;
-                            $this->upsertLog($tenant, $subscription, $recipient, $channel, $eventType, $address, $status, $error, $timestamp, $existingUuid);
+                            $existingAttempts = (int) ($existingLogs[$logKey]['attempts_count'] ?? 0);
+                            $this->upsertLog(
+                                $tenant,
+                                $subscription,
+                                $recipient,
+                                $channel,
+                                $eventType,
+                                $address,
+                                $subject,
+                                $result['status'],
+                                $result['error'],
+                                $existingAttempts + $result['attempts'],
+                                $timestamp,
+                                $existingUuid
+                            );
                             $existingLogs[$logKey] = [
                                 'uuid' => $existingUuid,
-                                'status' => $status,
+                                'status' => $result['status'],
+                                'attempts_count' => $existingAttempts + $result['attempts'],
                             ];
                         }
                     }
@@ -287,6 +310,7 @@ class PropertySubAlertService
             )] = [
                 'uuid' => $log->uuid,
                 'status' => $log->status,
+                'attempts_count' => (int) ($log->attempts_count ?? 0),
             ];
         }
 
@@ -300,8 +324,10 @@ class PropertySubAlertService
         string $channel,
         string $eventType,
         string $address,
+        string $subject,
         string $status,
         ?string $error,
+        int $attemptsCount,
         Carbon $timestamp,
         ?string $existingUuid = null
     ): void {
@@ -322,9 +348,12 @@ class PropertySubAlertService
                 'recipient_type' => $recipient['recipient_type'],
                 'recipient_name' => $recipient['name'] ?? null,
                 'recipient_address' => $address,
+                'subject' => $subject,
                 'status' => $status,
+                'attempts_count' => $attemptsCount,
                 'message' => $error,
                 'sent_at' => $timestamp,
+                'last_attempt_at' => $timestamp,
                 'updated_at' => $timestamp,
             ]
         );

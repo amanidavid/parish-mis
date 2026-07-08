@@ -3,6 +3,7 @@
 namespace App\Services\V1\Occupancy;
 
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\Concerns\DispatchesAlertsWithRetry;
 use App\Services\V1\Messaging\SmsService;
 use App\Services\V1\TenantProvisioningService;
 use App\Support\Tenancy\TenantConnectionManager;
@@ -16,6 +17,8 @@ use Throwable;
 
 class ContractAlertService
 {
+    use DispatchesAlertsWithRetry;
+
     private const EVENT_EXPIRING_SOON = 'expiring_soon';
     private const EVENT_EXPIRED = 'expired';
 
@@ -189,21 +192,40 @@ class ContractAlertService
                                 continue;
                             }
 
-                            $status = 'success';
-                            $error = null;
-
-                            try {
+                            $result = $this->dispatchAlertWithRetry(function () use (
+                                $channel,
+                                $address,
+                                $subject,
+                                $message,
+                                $recipient,
+                                $contract,
+                                $eventType
+                            ): void {
                                 $this->dispatchChannel($channel, $address, $subject, $message, $recipient, $contract, $eventType);
+                            }, 'contract_alerts');
+
+                            if ($result['status'] === 'success') {
                                 $sentAlerts++;
-                            } catch (Throwable $exception) {
-                                $status = 'failed';
-                                $error = $exception->getMessage();
                             }
 
                             $existingUuid = $existingLogs[$logKey]['uuid'] ?? null;
-                            $this->upsertLog($contract, $recipient, $channel, $eventType, $address, $status, $error, $timestamp, $existingUuid);
+                            $existingAttempts = (int) ($existingLogs[$logKey]['attempts_count'] ?? 0);
+                            $this->upsertLog(
+                                $contract,
+                                $recipient,
+                                $channel,
+                                $eventType,
+                                $address,
+                                $subject,
+                                $result['status'],
+                                $result['error'],
+                                $existingAttempts + $result['attempts'],
+                                $timestamp,
+                                $existingUuid
+                            );
                             $existingLogs[$logKey] = [
-                                'status' => $status,
+                                'status' => $result['status'],
+                                'attempts_count' => $existingAttempts + $result['attempts'],
                                 'uuid' => $existingUuid ?? $existingLogs[$logKey]['uuid'] ?? null,
                             ];
                         }
@@ -410,6 +432,7 @@ class ContractAlertService
             )] = [
                 'uuid' => $log->uuid,
                 'status' => $log->status,
+                'attempts_count' => (int) ($log->attempts_count ?? 0),
             ];
         }
 
@@ -425,8 +448,10 @@ class ContractAlertService
         string $channel,
         string $eventType,
         string $address,
+        string $subject,
         string $status,
         ?string $error,
+        int $attemptsCount,
         Carbon $timestamp,
         ?string $existingUuid = null
     ): void {
@@ -446,9 +471,12 @@ class ContractAlertService
                 'recipient_type' => $recipient['recipient_type'],
                 'recipient_name' => $recipient['name'] ?? null,
                 'recipient_address' => $address,
+                'subject' => $subject,
                 'status' => $status,
+                'attempts_count' => $attemptsCount,
                 'message' => $error,
                 'sent_at' => $timestamp,
+                'last_attempt_at' => $timestamp,
                 'updated_at' => $timestamp,
             ]
         );

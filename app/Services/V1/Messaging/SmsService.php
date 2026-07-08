@@ -138,13 +138,7 @@ class SmsService
                 continue;
             }
 
-            if (str_starts_with($recipient, '+')) {
-                $normalized[] = '+'.preg_replace('/\D+/', '', substr($recipient, 1));
-
-                continue;
-            }
-
-            $normalized[] = preg_replace('/\D+/', '', $recipient);
+            $normalized[] = $this->normalizeRecipient($recipient);
         }
 
         if ($normalized === []) {
@@ -152,6 +146,42 @@ class SmsService
         }
 
         return array_values(array_unique($normalized));
+    }
+
+    /**
+     * Normalize a single recipient for SMS delivery.
+     */
+    private function normalizeRecipient(string $recipient): string
+    {
+        $hasPlusPrefix = str_starts_with($recipient, '+');
+        $digits = preg_replace('/\D+/', '', $recipient);
+
+        if ($digits === '') {
+            throw new SmsDeliveryException('SMS recipient is required.');
+        }
+
+        if ($hasPlusPrefix) {
+            return '+'.$digits;
+        }
+
+        // Convert Tanzania-local formats into the provider-required +255 format.
+        if (str_starts_with($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+
+        if (str_starts_with($digits, '255')) {
+            return '+'.$digits;
+        }
+
+        if (strlen($digits) === 10 && str_starts_with($digits, '0')) {
+            return '+255'.substr($digits, 1);
+        }
+
+        if (strlen($digits) === 9 && preg_match('/^[67]\d{8}$/', $digits) === 1) {
+            return '+255'.$digits;
+        }
+
+        return '+'.$digits;
     }
 
     /**
