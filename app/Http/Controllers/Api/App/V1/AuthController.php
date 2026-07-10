@@ -178,7 +178,11 @@ class AuthController extends Controller
         }
 
         try {
-            $otp = $this->otp->create((int) $user->id, 'password_reset');
+            $otp = $this->otp->create(
+                (int) $user->id,
+                'password_reset',
+                $this->resolveOtpDeliveryChannel($data)
+            );
         } catch (RuntimeException $exception) {
             report($exception);
 
@@ -560,6 +564,22 @@ class AuthController extends Controller
         $username = trim((string) $username);
 
         return $username !== '' ? Str::lower($username) : null;
+    }
+
+    /**
+     * Resolve OTP delivery channel from the submitted credential.
+     */
+    private function resolveOtpDeliveryChannel(array $data): ?string
+    {
+        if (!empty($this->normalizeEmail($data['email'] ?? null))) {
+            return 'email';
+        }
+
+        if (!empty($data['phone'] ?? null)) {
+            return 'sms';
+        }
+
+        return null;
     }
 
     /**
