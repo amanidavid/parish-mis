@@ -20,6 +20,7 @@ class WorkspaceSubscriptionResource extends ApiJsonResource
             'access_state' => $this['access_state'] ?? null,
             'access_message' => $this['access_message'] ?? null,
             'inventory_changes_allowed' => $this['inventory_changes_allowed'] ?? null,
+            'trial_extension' => $this['trial_extension'] ?? data_get($this->resource, 'subscription.trial_extension.latest'),
             'subscription' => $this['subscription'],
             'usage' => $this['usage'],
         ];

@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\App\V1\DashboardReportController;
 use App\Http\Controllers\Api\App\V1\LocationController;
 use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceExpenseController;
 use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceJobController;
+use App\Http\Controllers\Api\App\V1\Maintenance\DailyPropertyExpenseController;
 use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceReportController;
 use App\Http\Controllers\Api\App\V1\PropertyController;
 use App\Http\Controllers\Api\App\V1\PropertyFloorController;
@@ -89,6 +90,7 @@ Route::prefix('v1')->group(function () {
                 Route::patch('tenants/{tenant}/billing-profile', [TenantController::class, 'assignBillingProfile']);
                 Route::patch('tenants/{tenant}/status', [TenantController::class, 'updateStatus']);
                 Route::patch('tenants/{tenant}/subscription-status', [TenantController::class, 'updateSubscriptionStatus']);
+                Route::post('tenants/{tenant}/trial-extension', [TenantController::class, 'extendTrial']);
                 Route::post('tenants/{tenant}/retry-provisioning', [TenantController::class, 'retryProvisioning']);
                 Route::get('reports/property-subscription-payments/summary', [PropertySubscriptionReportController::class, 'paymentSummary']);
                 Route::get('reports/property-subscriptions/by-workspace', [PropertySubscriptionReportController::class, 'byWorkspace']);
@@ -168,6 +170,8 @@ Route::prefix('v1')->group(function () {
                         ->parameters(['jobs' => 'maintenanceJob']);
                     Route::apiResource('expenses', MaintenanceExpenseController::class)
                         ->parameters(['expenses' => 'maintenanceExpense']);
+                    Route::apiResource('daily-expenses', DailyPropertyExpenseController::class)
+                        ->parameters(['daily-expenses' => 'dailyPropertyExpense']);
                 });
                 Route::apiResource('customers', CustomerController::class);
                 Route::get('customer-contracts/next-number', [CustomerContractController::class, 'nextNumber']);

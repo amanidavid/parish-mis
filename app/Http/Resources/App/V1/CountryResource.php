@@ -13,6 +13,7 @@ class CountryResource extends JsonResource
             'uuid' => $this->uuid,
             'name' => $this->name,
             'code' => $this->code,
+            'currency_code' => $this->currency_code,
             'dial_code' => $this->dial_code,
             'status' => $this->status,
             'regions_count' => $this->whenCounted('regions'),

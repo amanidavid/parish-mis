@@ -3,7 +3,6 @@
 namespace Database\Seeders\Tenant;
 
 use App\Support\PermissionLabel;
-use App\Models\Tenant\PropertyType;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\PermissionRegistrar;
@@ -12,13 +11,10 @@ class TenantSeeder extends Seeder
 {
     public function run(): void
     {
-        $this->call(LocationSeeder::class);
-
-        foreach (['Residential', 'Commercial', 'Mixed'] as $propertyTypeName) {
-            PropertyType::query()->firstOrCreate([
-                'name' => $propertyTypeName,
-            ]);
-        }
+        $this->call([
+            LocationSeeder::class,
+            PropertyTypeSeeder::class,
+        ]);
 
         DB::table('roles')->insertOrIgnore([
             ['name' => 'owner', 'guard_name' => 'api'],
@@ -37,6 +33,7 @@ class TenantSeeder extends Seeder
             'customer_contracts.view','customer_contracts.create','customer_contracts.update','customer_contracts.delete',
             'maintenance_jobs.view','maintenance_jobs.create','maintenance_jobs.update','maintenance_jobs.delete',
             'maintenance_expenses.view','maintenance_expenses.create','maintenance_expenses.update','maintenance_expenses.delete',
+            'daily_property_expenses.view','daily_property_expenses.create','daily_property_expenses.update','daily_property_expenses.delete',
             'renters.view','renters.create','renters.update',
             'leases.view','leases.create','leases.update',
             'invoices.view','invoices.create',
@@ -78,6 +75,7 @@ class TenantSeeder extends Seeder
             'customer_contracts.view', 'customer_contracts.create', 'customer_contracts.update',
             'maintenance_jobs.view', 'maintenance_jobs.create', 'maintenance_jobs.update',
             'maintenance_expenses.view', 'maintenance_expenses.create', 'maintenance_expenses.update',
+            'daily_property_expenses.view', 'daily_property_expenses.create', 'daily_property_expenses.update',
             'renters.view', 'renters.create',
             'leases.view', 'leases.create',
             'reports.view',

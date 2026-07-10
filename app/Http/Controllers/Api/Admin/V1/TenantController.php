@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin\V1;
 use App\Http\Controllers\Api\Admin\V1\Concerns\InteractsWithTenantAdminModels;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\Admin\V1\AssignTenantBillingRuleRequest;
+use App\Http\Requests\Api\Admin\V1\ExtendTrialRequest;
 use App\Http\Requests\Api\Admin\V1\TenantIndexRequest;
 use App\Http\Requests\Api\Admin\V1\AssignTenantBillingProfileRequest;
 use App\Http\Requests\Api\Admin\V1\TenantContractsSummaryRequest;
@@ -32,6 +33,7 @@ use App\Services\V1\SubscriptionBillingProfileChangeService;
 use App\Services\V1\SubscriptionService;
 use App\Services\V1\TenantAdminInsightService;
 use App\Services\V1\TenantProvisioningService;
+use App\Services\V1\TrialExtensionService;
 use App\Services\V1\WorkspaceService;
 use App\Support\ApiResponse;
 use Illuminate\Database\Eloquent\Builder;
@@ -50,6 +52,7 @@ class TenantController extends Controller
         private SubscriptionBillingProfileChangeService $subscriptionBillingProfileChangeService,
         private WorkspaceBillingRuleService $workspaceBillingRuleService,
         private TenantProvisioningService $tenantProvisioningService,
+        private TrialExtensionService $trialExtensionService,
         private WorkspaceService $workspaceService,
     )
     {
@@ -443,6 +446,30 @@ class TenantController extends Controller
         return ApiResponse::resource(
             new WorkspaceSubscriptionResource($this->subscriptionService->getWorkspaceSubscriptionSummary($tenant)),
             'Workspace subscription status updated successfully.'
+        );
+    }
+
+    /**
+     * Extend workspace trial.
+     */
+    public function extendTrial(ExtendTrialRequest $request, Tenant $tenant)
+    {
+        try {
+            $extension = $this->trialExtensionService->extendTrial($tenant, $request->validated(), request()->user());
+        } catch (InvalidArgumentException $exception) {
+            return ApiResponse::error(
+                'Workspace free trial could not be extended.',
+                ['trial_extension' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        $summary = $this->subscriptionService->getWorkspaceSubscriptionSummary($tenant->fresh());
+        $summary['trial_extension'] = $extension;
+
+        return ApiResponse::resource(
+            new WorkspaceSubscriptionResource($summary),
+            'Workspace free trial extended successfully.'
         );
     }
 

@@ -7,6 +7,7 @@ use App\Models\Landlord\BillingRule;
 use App\Models\Landlord\PropertySubscription;
 use App\Models\Landlord\Plan;
 use App\Models\Landlord\Subscription;
+use App\Models\Landlord\SubscriptionTrialExtension;
 use App\Models\Landlord\SubscriptionUsage;
 use App\Models\Landlord\WorkspaceProperty;
 use App\Models\Tenant\Property;
@@ -180,6 +181,10 @@ class SubscriptionService
                 'is_trial_active' => $subscriptionState['status'] === 'trialing',
                 'is_trial_expired' => $subscriptionState['trial_expired_at'] !== null,
                 'is_current_period_active' => $subscriptionState['is_current_period_active'],
+                'trial_extension' => [
+                    'total_extra_days' => (int) ($subscription->total_trial_extension_days ?? 0),
+                    'latest' => $this->formatTrialExtension($subscription->latestTrialExtension),
+                ],
                 'plan' => $plan ? [
                     'uuid' => $plan->uuid,
                     'name' => $plan->name,
@@ -268,7 +273,12 @@ class SubscriptionService
                 'created_at',
                 'updated_at',
             ])
-            ->with(['plan', 'billingProfile'])
+            ->with([
+                'plan',
+                'billingProfile',
+                'latestTrialExtension',
+            ])
+            ->withSum('trialExtensions as total_trial_extension_days', 'days')
             ->where('tenant_id', $tenant->id)
             ->latest('id')
             ->first();
@@ -846,6 +856,26 @@ class SubscriptionService
     private function formatDateTime(?CarbonInterface $value): ?string
     {
         return $value?->format('Y-m-d H:i:s');
+    }
+
+    /**
+     * Format trial extension.
+     */
+    private function formatTrialExtension(?SubscriptionTrialExtension $extension): ?array
+    {
+        if (!$extension) {
+            return null;
+        }
+
+        return [
+            'uuid' => $extension->uuid,
+            'extra_days' => (int) $extension->days,
+            'reason' => $extension->reason,
+            'old_trial_ends_at' => $this->formatDateTime($extension->old_trial_ends_at),
+            'new_trial_ends_at' => $this->formatDateTime($extension->new_trial_ends_at),
+            'extended_by_user_id' => $extension->extended_by_user_id,
+            'extended_at' => $this->formatDateTime($extension->created_at),
+        ];
     }
 
     /**

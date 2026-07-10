@@ -165,7 +165,7 @@ class CustomerContractController extends Controller
             'property_uuid' => $unit->propertyFloor->property->uuid,
             'start_date' => $startDate,
             'monthly_rent_amount' => (float) $unit->monthly_rent_amount,
-            'rent_currency' => $unit->rent_currency ?? 'TZS',
+            'rent_currency' => $this->resolveContractCurrency($unit),
         ]);
     }
 
@@ -261,7 +261,7 @@ class CustomerContractController extends Controller
                         'amount' => $expectedTotal,
                         'expected_total_amount' => $expectedTotal,
                         'final_payable_amount' => $expectedTotal,
-                        'currency' => strtoupper($unit->rent_currency ?? 'TZS'),
+                        'currency' => $this->resolveContractCurrency($unit),
                         'status' => $data['status'] ?? 'draft',
                         'notes' => $data['notes'] ?? null,
                     ]);
@@ -436,7 +436,9 @@ class CustomerContractController extends Controller
             );
         }
 
-        if ($customerContract->transactions()->exists() && $this->changesPricingAnchorFields($data, $customerContract, $unitId)) {
+        $hasTransactions = $customerContract->transactions()->exists();
+
+        if ($hasTransactions && $this->changesPricingAnchorFields($data, $customerContract, $unitId)) {
             return ApiResponse::error(
                 'Paid contract cannot be repriced.',
                 ['contract' => ['This contract already has payment records, so unit, start date, and contract months cannot be changed. Create a new contract for the new unit, or terminate this one first if the tenant is moving.']],
@@ -463,7 +465,6 @@ class CustomerContractController extends Controller
         $startDate = (string) ($data['start_date'] ?? $customerContract->start_date?->toDateString());
         $contractMonths = (int) ($data['contract_months'] ?? $customerContract->contract_months);
         $endDate = $this->financeService->calculateEndDate($startDate, $contractMonths);
-        $hasTransactions = $customerContract->transactions()->exists();
         $expectedTotal = $hasTransactions
             ? (float) $customerContract->expected_total_amount
             : $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $contractMonths);
@@ -471,7 +472,8 @@ class CustomerContractController extends Controller
         if ($error = $this->validateAdditionalPaymentAmount(
             (float) ($data['additional_amount_paid'] ?? 0),
             $customerContract,
-            $expectedTotal
+            $expectedTotal,
+            $hasTransactions
         )) {
             return $error;
         }
@@ -484,10 +486,9 @@ class CustomerContractController extends Controller
             return ApiResponse::error('Contract period conflict', ['unit_uuid' => ['This unit already has an overlapping contract period']], 422);
         }
 
-        DB::transaction(function () use ($customerContract, $customer, $unitId, $data, $unit) {
+        DB::transaction(function () use ($customerContract, $customer, $unitId, $data, $unit, $hasTransactions) {
             $previousUnitId = $customerContract->unit_id;
             $previousCustomerId = $customerContract->customer_id;
-            $hasTransactions = $customerContract->transactions()->exists();
             $resolvedContractMonths = (int) ($data['contract_months'] ?? $customerContract->contract_months);
             $resolvedStartDate = (string) ($data['start_date'] ?? $customerContract->start_date?->toDateString());
             $expectedTotal = $this->financeService->calculateExpectedTotal((float) $unit->monthly_rent_amount, $resolvedContractMonths);
@@ -503,7 +504,7 @@ class CustomerContractController extends Controller
                 'amount' => $hasTransactions ? $customerContract->amount : $expectedTotal,
                 'expected_total_amount' => $hasTransactions ? $customerContract->expected_total_amount : $expectedTotal,
                 'final_payable_amount' => $hasTransactions ? $customerContract->final_payable_amount : $expectedTotal,
-                'currency' => $hasTransactions ? $customerContract->currency : strtoupper($unit->rent_currency ?? $customerContract->currency),
+                'currency' => $hasTransactions ? $customerContract->currency : $this->resolveContractCurrency($unit, $customerContract->currency),
                 'status' => $data['status'] ?? $customerContract->status,
                 'termination_date' => array_key_exists('termination_date', $data) ? $data['termination_date'] : $customerContract->termination_date,
                 'termination_reason' => array_key_exists('termination_reason', $data) ? $data['termination_reason'] : $customerContract->termination_reason,
@@ -748,13 +749,14 @@ class CustomerContractController extends Controller
     private function validateAdditionalPaymentAmount(
         float $additionalAmountPaid,
         CustomerContract $customerContract,
-        float $expectedTotal
+        float $expectedTotal,
+        ?bool $hasTransactions = null
     ): ?\Illuminate\Http\JsonResponse {
         if ($additionalAmountPaid <= 0) {
             return null;
         }
 
-        $remainingBeforePayment = $customerContract->transactions()->exists()
+        $remainingBeforePayment = ($hasTransactions ?? $customerContract->transactions()->exists())
             ? (float) $customerContract->outstanding_balance
             : max($expectedTotal - (float) $customerContract->net_collected_amount, 0);
 
@@ -770,5 +772,18 @@ class CustomerContractController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Resolve contract currency from property-first unit data.
+     */
+    private function resolveContractCurrency(Unit $unit, ?string $fallbackCurrency = null): string
+    {
+        $currency = strtoupper(trim((string) ($unit->propertyFloor?->property?->currency
+            ?? $unit->rent_currency
+            ?? $fallbackCurrency
+            ?? 'TZS')));
+
+        return $currency !== '' ? $currency : 'TZS';
     }
 }
