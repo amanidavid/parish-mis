@@ -17,7 +17,7 @@ class LocationSeeder extends Seeder
 {
     private const DATA_DIRECTORY = 'database/seeders/Tenant/data/locations';
     private const DATA_FILES = [
-        'countries' => ['countries.json', 'countries.php'],
+        'countries' => ['countries.php', 'countries.json'],
         'regions' => ['regions.json', 'regions.php'],
         'districts' => ['districts.json', 'districts.php'],
         'wards' => ['wards.json', 'wards.php'],
@@ -156,6 +156,7 @@ class LocationSeeder extends Seeder
                 'dial_code' => $this->normalizeText($record['dial_code'] ?? null),
                 'dial_code_search' => $this->normalizeDialCode($record['dial_code'] ?? null),
                 'code' => $this->normalizeCode($record['code'] ?? null),
+                'currency_code' => $this->normalizeCode($record['currency_code'] ?? null),
                 'status' => 'active',
                 'created_at' => $this->normalizeTimestamp($record['created_at'] ?? null, $timestamp),
                 'updated_at' => $this->normalizeTimestamp($record['updated_at'] ?? null, $timestamp),
@@ -164,7 +165,7 @@ class LocationSeeder extends Seeder
 
         $payload = $this->deduplicateByNaturalKey('countries', $payload, ['name']);
 
-        $this->upsertByLegacyId('countries', $payload, ['uuid', 'name', 'dial_code', 'dial_code_search', 'code', 'status', 'updated_at']);
+        $this->upsertByLegacyId('countries', $payload, ['uuid', 'name', 'dial_code', 'dial_code_search', 'code', 'currency_code', 'status', 'updated_at']);
 
         return Country::query()
             ->whereIn('legacy_id', array_column($payload, 'legacy_id'))

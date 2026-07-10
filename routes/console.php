@@ -3,6 +3,7 @@
 use App\Models\Landlord\AutomationTaskSetting;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertySubscriptionAutomationService;
+use App\Services\V1\Billing\WorkspaceTrialAlertService;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
 use App\Services\V1\Occupancy\ContractAlertService;
 use App\Support\Tenancy\TenantConnectionManager;
@@ -114,6 +115,55 @@ Artisan::command('tenants:seed-existing {--tenant=} {--chunk=20}', function () u
     return self::SUCCESS;
 })->purpose('Run tenant seeders for existing ready tenant databases');
 
+Artisan::command('tenants:seed-property-types {--tenant=} {--chunk=20}', function () use ($tenantConnectionName) {
+    $tenantUuid = $this->option('tenant');
+    $chunkSize = max((int) $this->option('chunk'), 1);
+
+    $runSeeder = function (Tenant $tenant) use ($tenantConnectionName): void {
+        try {
+            app(TenantConnectionManager::class)->activateTenant($tenant);
+
+            $exitCode = Artisan::call('db:seed', [
+                '--class' => 'Database\\Seeders\\Tenant\\PropertyTypeSeeder',
+                '--database' => $tenantConnectionName,
+                '--force' => true,
+            ]);
+
+            if ($exitCode !== 0) {
+                throw new RuntimeException(trim(Artisan::output()) ?: 'Property type seeding failed');
+            }
+
+            $this->info(sprintf('[OK] %s | %s', $tenant->uuid, $tenant->database));
+        } catch (Throwable $exception) {
+            $this->error(sprintf('[FAIL] %s | %s | %s', $tenant->uuid, $tenant->database, $exception->getMessage()));
+        } finally {
+            app(TenantConnectionManager::class)->clearTenantContext();
+        }
+    };
+
+    if ($tenantUuid) {
+        $tenant = Tenant::query()
+            ->where('uuid', $tenantUuid)
+            ->where('provisioning_status', 'ready')
+            ->firstOrFail();
+
+        $runSeeder($tenant);
+
+        return self::SUCCESS;
+    }
+
+    Tenant::query()
+        ->where('provisioning_status', 'ready')
+        ->orderBy('id')
+        ->chunkById($chunkSize, function ($tenants) use ($runSeeder) {
+            foreach ($tenants as $tenant) {
+                $runSeeder($tenant);
+            }
+        });
+
+    return self::SUCCESS;
+})->purpose('Run the tenant property type seeder for existing ready tenant databases');
+
 Artisan::command('billing:sync-workspace-properties {--tenant=} {--chunk=20}', function () {
     $tenantUuid = $this->option('tenant');
     $chunkSize = max((int) $this->option('chunk'), 1);
@@ -170,6 +220,20 @@ Artisan::command('contracts:send-alerts {--tenant=} {--chunk=20}', function () {
 
     return self::SUCCESS;
 })->purpose('Send expiring soon and expired contract alerts across ready tenant databases');
+
+Artisan::command('billing:send-workspace-trial-alerts {--tenant=} {--chunk=100}', function () {
+    $tenantUuid = $this->option('tenant');
+    $chunkSize = max((int) $this->option('chunk'), 1);
+
+    $alertsSent = app(WorkspaceTrialAlertService::class)->syncReadyTenants(
+        $tenantUuid ? (string) $tenantUuid : null,
+        $chunkSize
+    );
+
+    $this->info(sprintf('Workspace trial alert sync completed. Alerts sent: %d', $alertsSent));
+
+    return self::SUCCESS;
+})->purpose('Send expiring soon and expiry day workspace trial alerts to workspace owners');
 
 Artisan::command('billing:run-automation', function () {
     $executed = app(PropertySubscriptionAutomationService::class)->runDueTasks();

@@ -22,6 +22,7 @@ class UpdatePropertyRequest extends FormRequest
             'ward_uuid' => ['sometimes', 'nullable', 'uuid'],
             'address_line' => ['sometimes', 'nullable', 'string', 'max:255'],
             'postal_code' => ['sometimes', 'nullable', 'string', 'max:20'],
+            'currency' => ['sometimes', 'nullable', 'string', 'size:3'],
             'status' => ['sometimes', 'in:active,inactive'],
         ];
     }

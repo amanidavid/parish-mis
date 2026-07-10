@@ -134,11 +134,15 @@ class UnitController extends Controller
             return ApiResponse::error('Unit already exists', ['unit_number' => ['Duplicate unit number for this floor']], 422);
         }
 
+        if ($error = $this->assertUnitCurrencyMatchesProperty($property, $data)) {
+            return $error;
+        }
+
         $unit = DB::transaction(fn () => Unit::query()->create([
             'property_floor_id' => $propertyFloor->id,
             'unit_number' => trim($data['unit_number']),
             'monthly_rent_amount' => $data['monthly_rent_amount'],
-            'rent_currency' => strtoupper($data['rent_currency'] ?? 'TZS'),
+            'rent_currency' => $this->resolveUnitCurrency($property),
             'status' => $data['status'] ?? 'vacant',
         ]));
 
@@ -198,12 +202,16 @@ class UnitController extends Controller
             return ApiResponse::error('Unit already exists', ['unit_number' => ['Duplicate unit number for this floor']], 422);
         }
 
-        DB::transaction(function () use ($unit, $propertyFloor, $unitNumber, $data) {
+        if ($error = $this->assertUnitCurrencyMatchesProperty($property, $data)) {
+            return $error;
+        }
+
+        DB::transaction(function () use ($unit, $propertyFloor, $property, $unitNumber, $data) {
             $unit->fill([
                 'property_floor_id' => $propertyFloor->id,
                 'unit_number' => $unitNumber,
                 'monthly_rent_amount' => $data['monthly_rent_amount'] ?? $unit->monthly_rent_amount,
-                'rent_currency' => isset($data['rent_currency']) ? strtoupper($data['rent_currency']) : $unit->rent_currency,
+                'rent_currency' => $this->resolveUnitCurrency($property),
                 'status' => $data['status'] ?? $unit->status,
             ])->save();
         });
@@ -282,5 +290,38 @@ class UnitController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Assert unit currency matches property currency.
+     */
+    private function assertUnitCurrencyMatchesProperty(Property $property, array $data): ?\Illuminate\Http\JsonResponse
+    {
+        if (!array_key_exists('rent_currency', $data)) {
+            return null;
+        }
+
+        $requestedCurrency = strtoupper(trim((string) ($data['rent_currency'] ?? '')));
+        $propertyCurrency = $this->resolveUnitCurrency($property);
+
+        if ($requestedCurrency !== '' && $requestedCurrency !== $propertyCurrency) {
+            return ApiResponse::error(
+                'Unit currency must match property currency.',
+                ['rent_currency' => ['Unit currency must match the property currency.']],
+                422
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * Resolve unit currency from property.
+     */
+    private function resolveUnitCurrency(Property $property): string
+    {
+        $propertyCurrency = strtoupper(trim((string) ($property->currency ?? '')));
+
+        return $propertyCurrency !== '' ? $propertyCurrency : 'TZS';
     }
 }

@@ -69,21 +69,23 @@ class MaintenanceReportService
     public function byProperty(User $tenantUser, array $filters = []): LengthAwarePaginator
     {
         $scope = $this->resolveScope($tenantUser);
-        $query = $this->expensesBaseQuery($scope, $filters)
-            ->join('properties', 'properties.id', '=', 'maintenance_jobs.property_id')
+        $query = $this->reportExpensesBaseQuery($scope, $filters)
             ->select([
-                'properties.uuid as property_uuid',
-                'properties.name as property_name',
-                'properties.status as property_status',
+                'expenses.property_uuid',
+                'expenses.property_name',
+                'expenses.property_status',
+                'expenses.property_currency',
             ])
-            ->selectRaw('COUNT(DISTINCT maintenance_jobs.id) as jobs_count')
-            ->selectRaw('COUNT(maintenance_expenses.id) as expenses_count')
-            ->selectRaw('COALESCE(SUM(maintenance_expenses.amount), 0) as total_amount')
-            ->selectRaw('MAX(maintenance_expenses.expense_date) as latest_expense_date')
-            ->groupBy('properties.id', 'properties.uuid', 'properties.name', 'properties.status');
+            ->selectRaw('COUNT(DISTINCT expenses.maintenance_job_id) as jobs_count')
+            ->selectRaw('COUNT(expenses.expense_uuid) as expenses_count')
+            ->selectRaw("SUM(CASE WHEN expenses.expense_source = 'maintenance_job' THEN 1 ELSE 0 END) as maintenance_expenses_count")
+            ->selectRaw("SUM(CASE WHEN expenses.expense_source = 'daily_property' THEN 1 ELSE 0 END) as daily_expenses_count")
+            ->selectRaw('COALESCE(SUM(expenses.amount), 0) as total_amount')
+            ->selectRaw('MAX(expenses.expense_date) as latest_expense_date')
+            ->groupBy('expenses.property_uuid', 'expenses.property_name', 'expenses.property_status', 'expenses.property_currency');
 
         if (!empty($filters['search'] ?? null)) {
-            $query->where('properties.name', 'like', $filters['search'].'%');
+            $query->where('expenses.property_name', 'like', $filters['search'].'%');
         }
 
         $this->applyByPropertySort($query, $filters['sort'] ?? null);
@@ -99,39 +101,14 @@ class MaintenanceReportService
     public function recentExpenses(User $tenantUser, array $filters = []): LengthAwarePaginator
     {
         $scope = $this->resolveScope($tenantUser);
-        $query = $this->expensesBaseQuery($scope, $filters)
-            ->join('properties', 'properties.id', '=', 'maintenance_jobs.property_id')
-            ->leftJoin('property_floors', 'property_floors.id', '=', 'maintenance_jobs.property_floor_id')
-            ->leftJoin('units', 'units.id', '=', 'maintenance_jobs.unit_id')
-            ->leftJoin('users as expense_recorders', 'expense_recorders.id', '=', 'maintenance_expenses.recorded_by')
-            ->select([
-                'maintenance_expenses.uuid as expense_uuid',
-                'maintenance_expenses.title as expense_title',
-                'maintenance_expenses.description as expense_description',
-                'maintenance_expenses.amount',
-                'maintenance_expenses.expense_date',
-                'maintenance_expenses.created_at',
-                'maintenance_jobs.uuid as maintenance_job_uuid',
-                'maintenance_jobs.title as maintenance_job_title',
-                'maintenance_jobs.reported_date',
-                'properties.uuid as property_uuid',
-                'properties.name as property_name',
-                'property_floors.uuid as property_floor_uuid',
-                'property_floors.name as property_floor_name',
-                'property_floors.floor_number',
-                'units.uuid as unit_uuid',
-                'units.unit_number',
-                'expense_recorders.uuid as recorded_by_uuid',
-                'expense_recorders.name as recorded_by_name',
-                'expense_recorders.email as recorded_by_email',
-            ]);
+        $query = $this->reportExpensesBaseQuery($scope, $filters);
 
         if (!empty($filters['search'] ?? null)) {
             $query->where(function (QueryBuilder $innerQuery) use ($filters) {
                 $innerQuery
-                    ->where('maintenance_expenses.title', 'like', $filters['search'].'%')
-                    ->orWhere('maintenance_jobs.title', 'like', $filters['search'].'%')
-                    ->orWhere('properties.name', 'like', $filters['search'].'%');
+                    ->where('expenses.expense_title', 'like', $filters['search'].'%')
+                    ->orWhere('expenses.maintenance_job_title', 'like', $filters['search'].'%')
+                    ->orWhere('expenses.property_name', 'like', $filters['search'].'%');
             });
         }
 
@@ -186,6 +163,113 @@ class MaintenanceReportService
     }
 
     /**
+     * Daily property expenses base query.
+     */
+    private function dailyExpensesBaseQuery(array $scope, array $filters, bool $applyDateWindow = true): QueryBuilder
+    {
+        $query = $this->tenantTable('daily_property_expenses')
+            ->join('properties', 'properties.id', '=', 'daily_property_expenses.property_id');
+
+        $query = $this->applyPropertyScopeToColumn($query, $scope, 'daily_property_expenses.property_id');
+
+        if (!empty($filters['property_uuid'] ?? null)) {
+            $query->where('properties.uuid', $filters['property_uuid']);
+        }
+
+        if (!empty($filters['maintenance_job_uuid'] ?? null)
+            || !empty($filters['property_floor_uuid'] ?? null)
+            || !empty($filters['unit_uuid'] ?? null)) {
+            $query->whereRaw('1 = 0');
+        }
+
+        if ($applyDateWindow && (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null))) {
+            $startDate = !empty($filters['start_date'] ?? null)
+                ? Carbon::parse($filters['start_date'])->toDateString()
+                : Carbon::parse($filters['end_date'])->toDateString();
+            $endDate = !empty($filters['end_date'] ?? null)
+                ? Carbon::parse($filters['end_date'])->toDateString()
+                : Carbon::parse($filters['start_date'])->toDateString();
+
+            $query->whereBetween('daily_property_expenses.expense_date', [$startDate, $endDate]);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Unified report expenses query for maintenance and daily property expenses.
+     */
+    private function reportExpensesBaseQuery(array $scope, array $filters): QueryBuilder
+    {
+        $maintenanceQuery = $this->expensesBaseQuery($scope, $filters)
+            ->join('properties', 'properties.id', '=', 'maintenance_jobs.property_id')
+            ->leftJoin('property_floors', 'property_floors.id', '=', 'maintenance_jobs.property_floor_id')
+            ->leftJoin('units', 'units.id', '=', 'maintenance_jobs.unit_id')
+            ->leftJoin('users as expense_recorders', 'expense_recorders.id', '=', 'maintenance_expenses.recorded_by')
+            ->selectRaw("'maintenance_job' as expense_source")
+            ->select([
+                'maintenance_expenses.uuid as expense_uuid',
+                'maintenance_expenses.title as expense_title',
+                'maintenance_expenses.description as expense_description',
+                'maintenance_expenses.amount',
+                'maintenance_expenses.expense_date',
+                'maintenance_expenses.created_at',
+                'maintenance_jobs.id as maintenance_job_id',
+                'maintenance_jobs.uuid as maintenance_job_uuid',
+                'maintenance_jobs.title as maintenance_job_title',
+                'maintenance_jobs.reported_date',
+                'properties.id as property_id',
+                'properties.uuid as property_uuid',
+                'properties.name as property_name',
+                'properties.status as property_status',
+                'properties.currency as property_currency',
+                'properties.currency as currency',
+                'property_floors.uuid as property_floor_uuid',
+                'property_floors.name as property_floor_name',
+                'property_floors.floor_number',
+                'units.uuid as unit_uuid',
+                'units.unit_number',
+                'expense_recorders.uuid as recorded_by_uuid',
+                'expense_recorders.name as recorded_by_name',
+                'expense_recorders.email as recorded_by_email',
+            ]);
+
+        $dailyQuery = $this->dailyExpensesBaseQuery($scope, $filters)
+            ->leftJoin('users as expense_recorders', 'expense_recorders.id', '=', 'daily_property_expenses.recorded_by')
+            ->selectRaw("'daily_property' as expense_source")
+            ->select([
+                'daily_property_expenses.uuid as expense_uuid',
+                'daily_property_expenses.title as expense_title',
+                'daily_property_expenses.description as expense_description',
+                'daily_property_expenses.amount',
+                'daily_property_expenses.expense_date',
+                'daily_property_expenses.created_at',
+                DB::raw('NULL as maintenance_job_id'),
+                DB::raw('NULL as maintenance_job_uuid'),
+                DB::raw('NULL as maintenance_job_title'),
+                DB::raw('NULL as reported_date'),
+                'properties.id as property_id',
+                'properties.uuid as property_uuid',
+                'properties.name as property_name',
+                'properties.status as property_status',
+                'properties.currency as property_currency',
+                'daily_property_expenses.currency as currency',
+                DB::raw('NULL as property_floor_uuid'),
+                DB::raw('NULL as property_floor_name'),
+                DB::raw('NULL as floor_number'),
+                DB::raw('NULL as unit_uuid'),
+                DB::raw('NULL as unit_number'),
+                'expense_recorders.uuid as recorded_by_uuid',
+                'expense_recorders.name as recorded_by_name',
+                'expense_recorders.email as recorded_by_email',
+            ]);
+
+        return DB::connection($this->tenantConnectionName())
+            ->query()
+            ->fromSub($maintenanceQuery->unionAll($dailyQuery), 'expenses');
+    }
+
+    /**
      * Resolve scope.
      */
     private function resolveScope(User $tenantUser): array
@@ -222,12 +306,12 @@ class MaintenanceReportService
         $column = ltrim((string) $sort, '-');
 
         match ($column) {
-            'jobs_count' => $query->orderBy('jobs_count', $direction)->orderBy('properties.name'),
-            'expenses_count' => $query->orderBy('expenses_count', $direction)->orderBy('properties.name'),
-            'total_amount' => $query->orderBy('total_amount', $direction)->orderBy('properties.name'),
-            'latest_expense_date' => $query->orderBy('latest_expense_date', $direction)->orderBy('properties.name'),
-            'name', '' => $query->orderBy('properties.name', $direction),
-            default => $query->orderBy('properties.name'),
+            'jobs_count' => $query->orderBy('jobs_count', $direction)->orderBy('expenses.property_name'),
+            'expenses_count' => $query->orderBy('expenses_count', $direction)->orderBy('expenses.property_name'),
+            'total_amount' => $query->orderBy('total_amount', $direction)->orderBy('expenses.property_name'),
+            'latest_expense_date' => $query->orderBy('latest_expense_date', $direction)->orderBy('expenses.property_name'),
+            'name', '' => $query->orderBy('expenses.property_name', $direction),
+            default => $query->orderBy('expenses.property_name'),
         };
     }
 
@@ -240,12 +324,12 @@ class MaintenanceReportService
         $column = ltrim((string) $sort, '-');
 
         match ($column) {
-            'amount' => $query->orderBy('maintenance_expenses.amount', $direction)->orderBy('maintenance_expenses.expense_date', 'desc'),
-            'title' => $query->orderBy('maintenance_expenses.title', $direction)->orderBy('maintenance_expenses.expense_date', 'desc'),
-            'property_name' => $query->orderBy('properties.name', $direction)->orderBy('maintenance_expenses.expense_date', 'desc'),
-            'created_at' => $query->orderBy('maintenance_expenses.created_at', $direction)->orderBy('maintenance_expenses.id', 'desc'),
-            'expense_date', '' => $query->orderBy('maintenance_expenses.expense_date', $direction)->orderBy('maintenance_expenses.id', 'desc'),
-            default => $query->orderBy('maintenance_expenses.expense_date', 'desc')->orderBy('maintenance_expenses.id', 'desc'),
+            'amount' => $query->orderBy('expenses.amount', $direction)->orderBy('expenses.expense_date', 'desc')->orderBy('expenses.created_at', 'desc'),
+            'title' => $query->orderBy('expenses.expense_title', $direction)->orderBy('expenses.expense_date', 'desc')->orderBy('expenses.created_at', 'desc'),
+            'property_name' => $query->orderBy('expenses.property_name', $direction)->orderBy('expenses.expense_date', 'desc')->orderBy('expenses.created_at', 'desc'),
+            'created_at' => $query->orderBy('expenses.created_at', $direction)->orderBy('expenses.expense_uuid', 'desc'),
+            'expense_date', '' => $query->orderBy('expenses.expense_date', $direction)->orderBy('expenses.created_at', 'desc')->orderBy('expenses.expense_uuid', 'desc'),
+            default => $query->orderBy('expenses.expense_date', 'desc')->orderBy('expenses.created_at', 'desc')->orderBy('expenses.expense_uuid', 'desc'),
         };
     }
 

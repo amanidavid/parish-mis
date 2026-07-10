@@ -22,6 +22,7 @@ class StorePropertyRequest extends FormRequest
             'ward_uuid' => ['nullable', 'uuid'],
             'address_line' => ['nullable', 'string', 'max:255'],
             'postal_code' => ['nullable', 'string', 'max:20'],
+            'currency' => ['nullable', 'string', 'size:3'],
             'status' => ['nullable', 'in:active,inactive'],
         ];
     }

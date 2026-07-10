@@ -4,6 +4,7 @@ namespace App\Services\V1;
 
 use App\Models\Tenant\Customer;
 use App\Models\Tenant\CustomerContract;
+use App\Models\Tenant\DailyPropertyExpense;
 use App\Models\Tenant\MaintenanceExpense;
 use App\Models\Tenant\MaintenanceJob;
 use App\Models\Tenant\Permission;
@@ -115,6 +116,14 @@ class PropertyAssignmentAccessService
      * Scope maintenance expenses.
      */
     public function scopeMaintenanceExpenses(Builder $query, User $user, string $column = 'maintenance_jobs.property_id'): Builder
+    {
+        return $this->scopeByAssignedPropertyIds($query, $user, $column);
+    }
+
+    /**
+     * Scope daily property expenses.
+     */
+    public function scopeDailyPropertyExpenses(Builder $query, User $user, string $column = 'property_id'): Builder
     {
         return $this->scopeByAssignedPropertyIds($query, $user, $column);
     }
@@ -253,6 +262,15 @@ class PropertyAssignmentAccessService
                 ->value('property_id');
 
         return $propertyId !== null && $this->userCanAccessProperty($user, (int) $propertyId);
+    }
+
+    /**
+     * Determine whether access daily property expense model.
+     */
+    public function canAccessDailyPropertyExpenseModel(User $user, DailyPropertyExpense $dailyPropertyExpense): bool
+    {
+        return $dailyPropertyExpense->property_id !== null
+            && $this->userCanAccessProperty($user, (int) $dailyPropertyExpense->property_id);
     }
 
     /**

@@ -15,6 +15,7 @@ class PropertyResource extends ApiJsonResource
         return [
             'uuid' => $this->uuid,
             'name' => $this->name,
+            'currency' => $this->currency,
             'type' => $this->whenLoaded('type', fn () => $this->type ? [
                 'uuid' => $this->type->uuid,
                 'name' => $this->type->name,
@@ -26,6 +27,7 @@ class PropertyResource extends ApiJsonResource
                     'uuid' => $country->uuid,
                     'name' => $country->name,
                     'code' => $country->code,
+                    'currency_code' => $country->currency_code,
                 ] : null,
                 'region' => $region ? [
                     'uuid' => $region->uuid,

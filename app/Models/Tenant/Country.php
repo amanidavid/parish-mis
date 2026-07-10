@@ -9,6 +9,10 @@ class Country extends BaseModel
 {
     protected $table = 'countries';
 
+    protected $casts = [
+        'currency_code' => 'string',
+    ];
+
     public function regions(): HasMany
     {
         return $this->hasMany(Region::class);

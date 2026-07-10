@@ -11,6 +11,10 @@ class Property extends BaseModel
 {
     protected $table = 'properties';
 
+    protected $casts = [
+        'currency' => 'string',
+    ];
+
     public function country(): BelongsTo
     {
         return $this->belongsTo(Country::class, 'country_id');

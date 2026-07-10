@@ -11,18 +11,21 @@ class MaintenanceRecentExpenseReportResource extends ApiJsonResource
     {
         return [
             'expense_uuid' => $this->expense_uuid,
+            'expense_source' => $this->expense_source,
             'title' => $this->expense_title,
             'description' => $this->expense_description,
             'amount' => (float) $this->amount,
+            'currency' => $this->currency,
             'expense_date' => $this->expense_date,
-            'maintenance_job' => [
+            'maintenance_job' => $this->maintenance_job_uuid ? [
                 'uuid' => $this->maintenance_job_uuid,
                 'title' => $this->maintenance_job_title,
                 'reported_date' => $this->reported_date,
-            ],
+            ] : null,
             'property' => [
                 'uuid' => $this->property_uuid,
                 'name' => $this->property_name,
+                'currency' => $this->property_currency,
             ],
             'property_floor' => $this->property_floor_uuid ? [
                 'uuid' => $this->property_floor_uuid,

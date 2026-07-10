@@ -5,6 +5,7 @@ namespace App\Models\Landlord;
 use App\Models\BaseModel;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Subscription extends BaseModel
 {
@@ -42,5 +43,15 @@ class Subscription extends BaseModel
     public function usageAdjustments(): HasMany
     {
         return $this->hasMany(SubscriptionUsageAdjustment::class, 'subscription_id');
+    }
+
+    public function trialExtensions(): HasMany
+    {
+        return $this->hasMany(SubscriptionTrialExtension::class, 'subscription_id');
+    }
+
+    public function latestTrialExtension(): HasOne
+    {
+        return $this->hasOne(SubscriptionTrialExtension::class, 'subscription_id')->latestOfMany();
     }
 }

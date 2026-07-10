@@ -9,10 +9,13 @@ use App\Http\Requests\Api\App\V1\StorePropertyRequest;
 use App\Http\Requests\Api\App\V1\UpdatePropertyRequest;
 use App\Http\Resources\App\V1\PropertyResource;
 use App\Models\Tenant\Country;
+use App\Models\Tenant\CustomerContract;
 use App\Models\Tenant\District;
 use App\Models\Tenant\Property;
+use App\Models\Tenant\PropertyFloor;
 use App\Models\Tenant\PropertyType;
 use App\Models\Tenant\Region;
+use App\Models\Tenant\Unit;
 use App\Models\Tenant\User as TenantUser;
 use App\Models\Tenancy\Tenant;
 use App\Models\Tenant\Ward;
@@ -160,6 +163,7 @@ class PropertyController extends Controller
             'ward_id' => $location['ward']?->id,
             'address_line' => $data['address_line'] ?? null,
             'postal_code' => $data['postal_code'] ?? null,
+            'currency' => $this->resolvePropertyCurrency($data, $location['country']),
             'status' => $data['status'] ?? 'active',
         ]));
 
@@ -237,6 +241,7 @@ class PropertyController extends Controller
         $regionId = $location['region']?->id;
         $districtId = $location['district']?->id;
         $wardId = $location['ward']?->id;
+        $currency = $this->resolveUpdatedPropertyCurrency($property, $data, $location['country']);
 
         $name = isset($data['name']) ? trim($data['name']) : $property->name;
         $exists = Property::query()
@@ -248,7 +253,17 @@ class PropertyController extends Controller
             return ApiResponse::error('A property with this name already exists', ['name' => ['Duplicate property name']], 422);
         }
 
-        DB::transaction(function () use ($property, $name, $typeId, $countryId, $regionId, $districtId, $wardId, $data) {
+        if ($currency !== strtoupper((string) $property->currency) && $this->propertyHasContractHistory((int) $property->id)) {
+            return ApiResponse::error(
+                'Property currency cannot be changed.',
+                ['currency' => ['Property currency cannot be changed after contract history already exists for this property.']],
+                422
+            );
+        }
+
+        DB::transaction(function () use ($property, $name, $typeId, $countryId, $regionId, $districtId, $wardId, $currency, $data) {
+            $originalCurrency = strtoupper((string) $property->currency);
+
             $property->fill([
                 'name' => $name,
                 'type_id' => $typeId,
@@ -258,8 +273,17 @@ class PropertyController extends Controller
                 'ward_id' => $wardId,
                 'address_line' => array_key_exists('address_line', $data) ? $data['address_line'] : $property->address_line,
                 'postal_code' => array_key_exists('postal_code', $data) ? $data['postal_code'] : $property->postal_code,
+                'currency' => $currency,
                 'status' => $data['status'] ?? $property->status,
             ])->save();
+
+            if ($currency !== $originalCurrency) {
+                Unit::query()
+                    ->whereIn('property_floor_id', PropertyFloor::query()
+                        ->select('id')
+                        ->where('property_id', $property->id))
+                    ->update(['rent_currency' => $currency]);
+            }
         });
 
         $this->syncWorkspacePropertyRegistry([(int) $property->id]);
@@ -415,7 +439,7 @@ class PropertyController extends Controller
         if (!empty($data['region_uuid'] ?? null)) {
             $region = Region::query()
                 ->select(['id', 'uuid', 'country_id', 'name'])
-                ->with('country:id,uuid,name,code')
+                ->with('country:id,uuid,name,code,currency_code')
                 ->where('uuid', $data['region_uuid'])
                 ->first();
 
@@ -429,7 +453,7 @@ class PropertyController extends Controller
         if (!empty($data['district_uuid'] ?? null)) {
             $district = District::query()
                 ->select(['id', 'uuid', 'region_id', 'name'])
-                ->with('region:id,uuid,country_id,name', 'region.country:id,uuid,name,code')
+                ->with('region:id,uuid,country_id,name', 'region.country:id,uuid,name,code,currency_code')
                 ->where('uuid', $data['district_uuid'])
                 ->first();
 
@@ -444,7 +468,7 @@ class PropertyController extends Controller
         if (!empty($data['ward_uuid'] ?? null)) {
             $ward = Ward::query()
                 ->select(['id', 'uuid', 'district_id', 'name'])
-                ->with('district:id,uuid,region_id,name', 'district.region:id,uuid,country_id,name', 'district.region.country:id,uuid,name,code')
+                ->with('district:id,uuid,region_id,name', 'district.region:id,uuid,country_id,name', 'district.region.country:id,uuid,name,code,currency_code')
                 ->where('uuid', $data['ward_uuid'])
                 ->first();
 
@@ -576,5 +600,54 @@ class PropertyController extends Controller
 
             return $property;
         });
+    }
+
+    /**
+     * Resolve property currency.
+     */
+    private function resolvePropertyCurrency(array $data, ?Country $country): string
+    {
+        $requestedCurrency = strtoupper(trim((string) ($data['currency'] ?? '')));
+
+        if ($requestedCurrency !== '') {
+            return $requestedCurrency;
+        }
+
+        $countryCurrency = strtoupper(trim((string) ($country?->currency_code ?? '')));
+
+        return $countryCurrency !== '' ? $countryCurrency : 'TZS';
+    }
+
+    /**
+     * Resolve updated property currency.
+     */
+    private function resolveUpdatedPropertyCurrency(Property $property, array $data, ?Country $country): string
+    {
+        if (array_key_exists('currency', $data)) {
+            $requestedCurrency = strtoupper(trim((string) ($data['currency'] ?? '')));
+
+            if ($requestedCurrency !== '') {
+                return $requestedCurrency;
+            }
+        }
+
+        $currentCurrency = strtoupper(trim((string) ($property->currency ?? '')));
+        if ($currentCurrency !== '') {
+            return $currentCurrency;
+        }
+
+        return $this->resolvePropertyCurrency($data, $country);
+    }
+
+    /**
+     * Determine whether property already has contract history.
+     */
+    private function propertyHasContractHistory(int $propertyId): bool
+    {
+        return CustomerContract::query()
+            ->join('units', 'units.id', '=', 'customer_contracts.unit_id')
+            ->join('property_floors', 'property_floors.id', '=', 'units.property_floor_id')
+            ->where('property_floors.property_id', $propertyId)
+            ->exists();
     }
 }

@@ -23,6 +23,7 @@ class PropertySubscriptionAutomationService
         private CustomerContractAutomationService $customerContractAutomationService,
         private ContractAlertService $contractAlertService,
         private PropertySubAlertService $propertySubAlertService,
+        private WorkspaceTrialAlertService $workspaceTrialAlertService,
     ) {
     }
 
@@ -159,6 +160,7 @@ class PropertySubscriptionAutomationService
                     AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => $this->customerContractAutomationService->syncReadyTenants(),
                     AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => $this->contractAlertService->syncReadyTenants(),
                     AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_ALERTS => $this->propertySubAlertService->syncReadyTenants(),
+                    AutomationTaskSetting::TASK_WORKSPACE_TRIAL_ALERTS => $this->workspaceTrialAlertService->syncReadyTenants(),
                     default => throw new InvalidArgumentException('Unsupported automation task.'),
                 };
 
@@ -281,6 +283,16 @@ class PropertySubscriptionAutomationService
                 'next_run_at' => $defaultNextRunAt->copy(),
                 'meta' => ['supports_run_now' => true],
             ],
+            AutomationTaskSetting::TASK_WORKSPACE_TRIAL_ALERTS => [
+                'name' => 'Workspace Trial Alerts',
+                'description' => 'Sends expiring soon and expiry day workspace free trial alerts to workspace owners.',
+                'enabled' => true,
+                'schedule_mode' => AutomationTaskSetting::MODE_INTERVAL,
+                'interval_minutes' => 15,
+                'timezone' => 'Africa/Nairobi',
+                'next_run_at' => $defaultNextRunAt->copy(),
+                'meta' => ['supports_run_now' => true],
+            ],
         ];
     }
 
@@ -302,6 +314,9 @@ class PropertySubscriptionAutomationService
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_ALERTS => $rowsAffected > 0
                 ? sprintf('Automation task completed successfully. %d property subscription alerts were sent.', $rowsAffected)
                 : 'Automation task completed successfully. No property subscription alerts were due.',
+            AutomationTaskSetting::TASK_WORKSPACE_TRIAL_ALERTS => $rowsAffected > 0
+                ? sprintf('Automation task completed successfully. %d workspace trial alerts were sent.', $rowsAffected)
+                : 'Automation task completed successfully. No workspace trial alerts were due.',
             default => 'Automation task completed successfully.',
         };
     }
@@ -314,6 +329,7 @@ class PropertySubscriptionAutomationService
         return match ($taskKey) {
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_ALERTS => 'Contract alerts could not be processed at the moment. Please check the notification configuration and try again.',
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_ALERTS => 'Property subscription alerts could not be processed at the moment. Please check the notification configuration and try again.',
+            AutomationTaskSetting::TASK_WORKSPACE_TRIAL_ALERTS => 'Workspace trial alerts could not be processed at the moment. Please check the notification configuration and try again.',
             AutomationTaskSetting::TASK_CUSTOMER_CONTRACT_EXPIRY_SYNC => 'Customer contract lifecycle sync could not be completed at the moment. Please try again shortly.',
             AutomationTaskSetting::TASK_PROPERTY_SUBSCRIPTION_EXPIRY_SYNC => 'Property subscription expiry sync could not be completed at the moment. Please try again shortly.',
             default => 'Automation task could not be completed at the moment. Please try again shortly.',

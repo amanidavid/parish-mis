@@ -117,20 +117,17 @@ class ContractReportService
             ->selectRaw("COALESCE(SUM(CASE WHEN customer_contract_transactions.type = 'refund' THEN customer_contract_transactions.amount ELSE 0 END), 0) as refund_amount")
             ->first();
 
-        $expensesQuery = $this->tenantTable('maintenance_expenses')
-            ->join('maintenance_jobs', 'maintenance_jobs.id', '=', 'maintenance_expenses.maintenance_job_id')
-            ->whereBetween('maintenance_expenses.expense_date', [$startDate, $endDate]);
-
-        $expensesQuery = $this->applyPropertyScopeToColumn($expensesQuery, $scope, 'maintenance_jobs.property_id');
-        $expensesQuery = $this->applyExpensePropertyFilter($expensesQuery, $filters);
-
-        $expenseTotals = (clone $expensesQuery)
-            ->selectRaw('COALESCE(SUM(maintenance_expenses.amount), 0) as total_expenses')
+        $expenseTotals = $this->combinedExpenseTotalsForWindow($scope, $filters, $startDate, $endDate)
+            ->selectRaw("COALESCE(SUM(CASE WHEN expenses.expense_source = 'maintenance_job' THEN expenses.amount ELSE 0 END), 0) as repair_expenses")
+            ->selectRaw("COALESCE(SUM(CASE WHEN expenses.expense_source = 'daily_property' THEN expenses.amount ELSE 0 END), 0) as daily_expenses")
+            ->selectRaw('COALESCE(SUM(expenses.amount), 0) as total_expenses')
             ->first();
 
         $grossCollected = (float) ($revenueTotals->gross_collected_amount ?? 0);
         $refundAmount = (float) ($revenueTotals->refund_amount ?? 0);
         $revenueCollected = $grossCollected - $refundAmount;
+        $repairExpenses = (float) ($expenseTotals->repair_expenses ?? 0);
+        $dailyExpenses = (float) ($expenseTotals->daily_expenses ?? 0);
         $totalExpenses = (float) ($expenseTotals->total_expenses ?? 0);
         $remainingDebts = (float) ($contractTotals->outstanding_contract_balance ?? 0);
 
@@ -145,6 +142,8 @@ class ContractReportService
             'summary_cards' => [
                 'total_contracts' => (int) ($contractTotals->total_contracts ?? 0),
                 'revenue_collected' => $revenueCollected,
+                'repair_expenses' => $repairExpenses,
+                'daily_expenses' => $dailyExpenses,
                 'total_expenses' => $totalExpenses,
                 'remaining' => $revenueCollected - $totalExpenses,
                 'remaining_debts' => $remainingDebts,
@@ -671,6 +670,46 @@ class ContractReportService
     {
         if (!empty($filters['property_uuid'] ?? null)) {
             $query->join('properties as filter_properties', 'filter_properties.id', '=', 'maintenance_jobs.property_id')
+                ->where('filter_properties.uuid', $filters['property_uuid']);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Build combined maintenance and daily expense totals for the summary cards window.
+     */
+    private function combinedExpenseTotalsForWindow(array $scope, array $filters, string $startDate, string $endDate): QueryBuilder
+    {
+        $maintenanceExpensesQuery = $this->tenantTable('maintenance_expenses')
+            ->join('maintenance_jobs', 'maintenance_jobs.id', '=', 'maintenance_expenses.maintenance_job_id')
+            ->whereBetween('maintenance_expenses.expense_date', [$startDate, $endDate]);
+
+        $maintenanceExpensesQuery = $this->applyPropertyScopeToColumn($maintenanceExpensesQuery, $scope, 'maintenance_jobs.property_id');
+        $maintenanceExpensesQuery = $this->applyExpensePropertyFilter($maintenanceExpensesQuery, $filters)
+            ->selectRaw("'maintenance_job' as expense_source")
+            ->selectRaw('maintenance_expenses.amount as amount');
+
+        $dailyExpensesQuery = $this->tenantTable('daily_property_expenses')
+            ->whereBetween('daily_property_expenses.expense_date', [$startDate, $endDate]);
+
+        $dailyExpensesQuery = $this->applyPropertyScopeToColumn($dailyExpensesQuery, $scope, 'daily_property_expenses.property_id');
+        $dailyExpensesQuery = $this->applyDailyExpensePropertyFilter($dailyExpensesQuery, $filters)
+            ->selectRaw("'daily_property' as expense_source")
+            ->selectRaw('daily_property_expenses.amount as amount');
+
+        return DB::connection($this->tenantConnectionName())
+            ->query()
+            ->fromSub($maintenanceExpensesQuery->unionAll($dailyExpensesQuery), 'expenses');
+    }
+
+    /**
+     * Apply property uuid filter to a daily property expense query.
+     */
+    private function applyDailyExpensePropertyFilter(QueryBuilder $query, array $filters): QueryBuilder
+    {
+        if (!empty($filters['property_uuid'] ?? null)) {
+            $query->join('properties as filter_properties', 'filter_properties.id', '=', 'daily_property_expenses.property_id')
                 ->where('filter_properties.uuid', $filters['property_uuid']);
         }
 
