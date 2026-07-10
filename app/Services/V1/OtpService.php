@@ -5,8 +5,9 @@ namespace App\Services\V1;
 use App\Models\Landlord\BaseUser;
 use App\Models\Landlord\OtpToken;
 use App\Services\V1\Messaging\SmsService;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use RuntimeException;
 use Throwable;
 
@@ -155,26 +156,57 @@ class OtpService
             return;
         }
 
-        if ($token->channel !== 'sms') {
+        if (!in_array($token->channel, ['sms', 'email'], true)) {
             throw new RuntimeException(sprintf('Unsupported OTP delivery channel [%s].', $token->channel));
         }
 
         $user = BaseUser::query()->find($token->user_id);
 
-        if (!$user || blank($user->phone)) {
-            throw new RuntimeException('OTP could not be sent because the user has no phone number.');
+        if (!$user) {
+            throw new RuntimeException('OTP could not be sent because the user account could not be resolved.');
         }
 
-        $message = strtr((string) config('otp.sms_template'), [
+        $replacements = [
             ':code' => $code,
             ':minutes' => (string) max((int) ceil($ttl / 60), 1),
             ':purpose' => (string) $token->purpose,
-        ]);
+        ];
 
-        $this->smsService->sendText((string) $user->phone, $message, null, [
-            'purpose' => $token->purpose,
-            'user_id' => $token->user_id,
-            'challenge_id' => $token->uuid,
-        ]);
+        if ($token->channel === 'sms') {
+            if (blank($user->phone)) {
+                throw new RuntimeException('OTP could not be sent because the user has no phone number.');
+            }
+
+            $message = strtr((string) config('otp.sms_template'), $replacements);
+
+            $this->smsService->sendText((string) $user->phone, $message, null, [
+                'purpose' => $token->purpose,
+                'user_id' => $token->user_id,
+                'challenge_id' => $token->uuid,
+            ]);
+
+            return;
+        }
+
+        if (blank($user->email)) {
+            throw new RuntimeException('OTP could not be sent because the user has no email address.');
+        }
+
+        $subject = strtr((string) config('otp.email_subject'), $replacements);
+        $message = strtr((string) config('otp.email_template'), $replacements);
+
+        Mail::raw($this->formatEmailMessage($message), function ($mail) use ($user, $subject) {
+            $mail->to((string) $user->email, (string) ($user->name ?? 'User'))
+                ->subject($subject);
+        });
+    }
+
+    /**
+     * Format OTP email message.
+     */
+    private function formatEmailMessage(string $message): string
+    {
+        return $message
+            ."\n\nPlease do not reply to this email. This mailbox is not monitored.";
     }
 }
