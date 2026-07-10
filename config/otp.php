@@ -11,4 +11,12 @@ return [
         'OTP_SMS_TEMPLATE',
         'Your Parish MIS verification code is :code. It expires in :minutes minutes.'
     ),
+    'email_subject' => env(
+        'OTP_EMAIL_SUBJECT',
+        'Your Parish MIS verification code'
+    ),
+    'email_template' => env(
+        'OTP_EMAIL_TEMPLATE',
+        "Hello,\n\nYour Parish MIS verification code is :code.\nIt expires in :minutes minutes.\n\nIf you did not request this code, please ignore this email."
+    ),
 ];
