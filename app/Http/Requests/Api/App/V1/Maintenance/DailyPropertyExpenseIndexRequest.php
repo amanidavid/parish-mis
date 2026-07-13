@@ -16,6 +16,7 @@ class DailyPropertyExpenseIndexRequest extends FormRequest
         return [
             'search' => ['nullable', 'string', 'max:120'],
             'property_uuid' => ['nullable', 'uuid'],
+            'expense_type_uuid' => ['nullable', 'uuid'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],

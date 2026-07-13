@@ -5,6 +5,9 @@ namespace App\Http\Controllers\Api\App\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\ChangePasswordRequest;
 use App\Http\Requests\Api\App\V1\ForgotPasswordRequest;
+use App\Http\Requests\Api\App\V1\GoogleLinkRequest;
+use App\Http\Requests\Api\App\V1\GoogleLoginRequest;
+use App\Http\Requests\Api\App\V1\GoogleRegisterRequest;
 use App\Http\Requests\Api\App\V1\LoginRequest;
 use App\Http\Requests\Api\App\V1\RegisterRequest;
 use App\Http\Requests\Api\App\V1\ResetPasswordRequest;
@@ -18,6 +21,7 @@ use App\Models\Landlord\OtpToken;
 use App\Models\Landlord\UserTenant;
 use App\Models\Tenant\Country;
 use App\Models\Tenant\User as TenantUser;
+use App\Services\V1\Auth\GoogleIdentityService;
 use App\Services\V1\JwtService;
 use App\Services\V1\OtpService;
 use App\Services\V1\SubscriptionService;
@@ -41,6 +45,7 @@ class AuthController extends Controller
         private SubscriptionService $subscriptionService,
         private TenantProvisioningService $tenantProvisioningService,
         private WorkspaceService $workspaceService,
+        private GoogleIdentityService $googleIdentityService,
     )
     {
     }
@@ -123,18 +128,158 @@ class AuthController extends Controller
             return ApiResponse::error('Invalid credentials', ['auth' => ['The provided credentials are incorrect.']], 401);
         }
 
-        [$token, $expiresIn] = $this->jwt->issueTokenForSubject((string) $user->uuid);
+        return $this->buildSessionResponse($user, 'Login successful.');
+    }
 
-        return ApiResponse::resource(
-            new AppSessionResource([
-                'access_token' => $token,
-                'token_type' => 'bearer',
-                'expires_in' => $expiresIn,
-                'user' => $user,
-                'tenants' => $this->tenantMemberships($user->id),
-            ]),
-            'Login successful.'
+    /**
+     * Handle Google registration.
+     */
+    public function googleRegister(GoogleRegisterRequest $request)
+    {
+        $data = $request->validated();
+
+        try {
+            $googleIdentity = $this->googleIdentityService->verifyIdToken($data['credential']);
+        } catch (RuntimeException $exception) {
+            return ApiResponse::error(
+                'Google sign-in could not be completed.',
+                ['google' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        $phone = $this->composePhoneNumber($data['country_code'], $data['phone']);
+        $name = trim((string) ($data['name'] ?? $googleIdentity['name']));
+
+        if ($name === '') {
+            return ApiResponse::error(
+                'Google registration could not be completed.',
+                ['name' => ['A display name is required for registration.']],
+                422
+            );
+        }
+
+        $username = $this->resolveRegistrationUsername($data['username'] ?? null, $name, $phone);
+
+        $exists = BaseUser::query()
+            ->where('google_subject', $googleIdentity['subject'])
+            ->orWhere('username', $username)
+            ->orWhere('phone', $phone)
+            ->orWhere('email', $googleIdentity['email'])
+            ->exists();
+
+        if ($exists) {
+            return ApiResponse::error(
+                'Google account already exists.',
+                ['google' => ['Use Google login or link this Google account from an existing profile.']],
+                422
+            );
+        }
+
+        [$baseUser, $workspace] = DB::connection('base')->transaction(function () use ($data, $googleIdentity, $name, $phone, $username) {
+            $baseUser = BaseUser::query()->create([
+                'uuid' => (string) Str::uuid(),
+                'username' => $username,
+                'name' => $name,
+                'phone' => $phone,
+                'email' => $googleIdentity['email'],
+                'google_subject' => $googleIdentity['subject'],
+                'password' => Hash::make(Str::random(40)),
+                'status' => 'active',
+                'meta' => $this->buildGoogleMetaPayload(
+                    $googleIdentity,
+                    ['country_code' => $this->normalizeCountryCode($data['country_code'] ?? null)]
+                ),
+            ]);
+
+            $workspace = $this->workspaceService->createWorkspaceForUser(
+                $baseUser,
+                $this->workspaceService->defaultWorkspaceDataForUser([
+                    'name' => $name,
+                    'phone' => $phone,
+                ]),
+                'google_registration',
+            );
+
+            return [$baseUser, $workspace];
+        });
+
+        $this->tenantProvisioningService->dispatchProvisioning($workspace, $baseUser->id);
+
+        return ApiResponse::success(
+            'Google registration successful. Your primary workspace was created and provisioning has been queued.',
+            [
+                'workspace_uuid' => $workspace->uuid,
+                'workspace_name' => $workspace->display_name,
+                'provisioning_status' => $workspace->provisioning_status,
+            ],
+            201
         );
+    }
+
+    /**
+     * Handle Google login.
+     */
+    public function googleLogin(GoogleLoginRequest $request)
+    {
+        $data = $request->validated();
+
+        try {
+            $googleIdentity = $this->googleIdentityService->verifyIdToken($data['credential']);
+        } catch (RuntimeException $exception) {
+            return ApiResponse::error(
+                'Google sign-in could not be completed.',
+                ['google' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        $user = $this->resolveBaseUserForGoogleIdentity($googleIdentity);
+
+        if (!$user) {
+            return ApiResponse::error(
+                'No account was found for this Google email.',
+                ['google' => ['Register first or link this Google account to an existing profile.']],
+                404
+            );
+        }
+
+        if (empty($user->google_subject)) {
+            $user = $this->attachGoogleIdentityToUser($user, $googleIdentity);
+        }
+
+        return $this->buildSessionResponse($user, 'Google login successful.');
+    }
+
+    /**
+     * Link Google account to current user.
+     */
+    public function linkGoogle(GoogleLinkRequest $request)
+    {
+        $baseUser = request()->attributes->get('base_user') ?? request()->attributes->get('auth_user');
+        if (!$baseUser instanceof BaseUser) {
+            return ApiResponse::error('Unauthorized', ['token' => ['Unable to resolve authenticated user']], 401);
+        }
+
+        $data = $request->validated();
+
+        try {
+            $googleIdentity = $this->googleIdentityService->verifyIdToken($data['credential']);
+        } catch (RuntimeException $exception) {
+            return ApiResponse::error(
+                'Google account could not be linked.',
+                ['google' => [$exception->getMessage()]],
+                422
+            );
+        }
+
+        $freshBaseUser = $this->attachGoogleIdentityToUser($baseUser, $googleIdentity, true);
+
+        return ApiResponse::success('Google account linked successfully.', [
+            'user_uuid' => $freshBaseUser->uuid,
+            'google_linked' => true,
+            'google_email' => $freshBaseUser->email,
+        ]);
     }
 
     /**
@@ -150,18 +295,7 @@ class AuthController extends Controller
 
         $otpRow = OtpToken::query()->where('uuid', $data['challenge_id'])->firstOrFail();
         $baseUser = BaseUser::query()->findOrFail($otpRow->user_id);
-        [$token, $expiresIn] = $this->jwt->issueTokenForSubject((string) $baseUser->uuid);
-
-        return ApiResponse::resource(
-            new AppSessionResource([
-                'access_token' => $token,
-                'token_type' => 'bearer',
-                'expires_in' => $expiresIn,
-                'user' => $baseUser,
-                'tenants' => $this->tenantMemberships($baseUser->id),
-            ]),
-            'OTP verified'
-        );
+        return $this->buildSessionResponse($baseUser, 'OTP verified');
     }
 
     /**
@@ -178,7 +312,11 @@ class AuthController extends Controller
         }
 
         try {
-            $otp = $this->otp->create((int) $user->id, 'password_reset');
+            $otp = $this->otp->create(
+                (int) $user->id,
+                'password_reset',
+                $this->resolveOtpDeliveryChannel($data)
+            );
         } catch (RuntimeException $exception) {
             report($exception);
 
@@ -250,18 +388,7 @@ class AuthController extends Controller
             return ApiResponse::error('Unauthorized', ['token' => ['Unable to resolve authenticated user']], 401);
         }
 
-        [$token, $expiresIn] = $this->jwt->issueTokenForSubject((string) $baseUser->uuid);
-
-        return ApiResponse::resource(
-            new AppSessionResource([
-                'access_token' => $token,
-                'token_type' => 'bearer',
-                'expires_in' => $expiresIn,
-                'user' => $baseUser,
-                'tenants' => $this->tenantMemberships($baseUser->id),
-            ]),
-            'Token refreshed'
-        );
+        return $this->buildSessionResponse($baseUser, 'Token refreshed');
     }
 
     /**
@@ -424,6 +551,146 @@ class AuthController extends Controller
     }
 
     /**
+     * Build a standard session response for app auth flows.
+     */
+    private function buildSessionResponse(BaseUser $user, string $message)
+    {
+        [$token, $expiresIn] = $this->jwt->issueTokenForSubject((string) $user->uuid);
+
+        BaseUser::query()->whereKey($user->id)->update([
+            'last_login_at' => now(),
+        ]);
+
+        $freshUser = BaseUser::query()->findOrFail($user->id);
+
+        return ApiResponse::resource(
+            new AppSessionResource([
+                'access_token' => $token,
+                'token_type' => 'bearer',
+                'expires_in' => $expiresIn,
+                'user' => $freshUser,
+                'tenants' => $this->tenantMemberships($freshUser->id),
+            ]),
+            $message
+        );
+    }
+
+    /**
+     * Resolve a base user by Google identity.
+     */
+    private function resolveBaseUserForGoogleIdentity(array $googleIdentity): ?BaseUser
+    {
+        $user = BaseUser::query()
+            ->where('google_subject', $googleIdentity['subject'])
+            ->first();
+
+        if ($user instanceof BaseUser) {
+            return $this->ensureSingleWorkspaceMembership($user);
+        }
+
+        $email = $this->normalizeEmail($googleIdentity['email'] ?? null);
+
+        if ($email === null) {
+            return null;
+        }
+
+        $query = BaseUser::query()->where('email', $email);
+        $count = (clone $query)->count();
+
+        if ($count > 1) {
+            return $this->throwSingleAccountRequired();
+        }
+
+        $matchedUser = $query->first();
+
+        if (!$matchedUser instanceof BaseUser) {
+            return null;
+        }
+
+        if (!empty($matchedUser->google_subject) && $matchedUser->google_subject !== $googleIdentity['subject']) {
+            throw new HttpResponseException(ApiResponse::error(
+                'Google sign-in could not be completed.',
+                ['google' => ['This email is already linked to another Google account.']],
+                422
+            ));
+        }
+
+        return $this->ensureSingleWorkspaceMembership($matchedUser);
+    }
+
+    /**
+     * Attach Google identity to a base user.
+     */
+    private function attachGoogleIdentityToUser(BaseUser $baseUser, array $googleIdentity, bool $strictEmailMatch = false): BaseUser
+    {
+        $normalizedGoogleEmail = $this->normalizeEmail($googleIdentity['email'] ?? null);
+        $normalizedUserEmail = $this->normalizeEmail($baseUser->email);
+
+        if ($strictEmailMatch && $normalizedUserEmail !== null && $normalizedUserEmail !== $normalizedGoogleEmail) {
+            throw new HttpResponseException(ApiResponse::error(
+                'Google account could not be linked.',
+                ['google' => ['The Google email must match the email on the current profile.']],
+                422
+            ));
+        }
+
+        $linkedUser = BaseUser::query()
+            ->select(['id', 'uuid'])
+            ->where('google_subject', $googleIdentity['subject'])
+            ->whereKeyNot($baseUser->id)
+            ->first();
+
+        if ($linkedUser) {
+            throw new HttpResponseException(ApiResponse::error(
+                'Google account could not be linked.',
+                ['google' => ['This Google account is already linked to another user.']],
+                422
+            ));
+        }
+
+        DB::connection('base')->transaction(function () use ($baseUser, $googleIdentity, $normalizedGoogleEmail, $normalizedUserEmail) {
+            $baseUser->forceFill([
+                'email' => $normalizedUserEmail ?? $normalizedGoogleEmail,
+                'google_subject' => $googleIdentity['subject'],
+                'meta' => $this->buildGoogleMetaPayload($googleIdentity, (array) $baseUser->meta),
+            ])->save();
+        });
+
+        return BaseUser::query()->findOrFail($baseUser->id);
+    }
+
+    /**
+     * Merge Google metadata into the base user meta payload.
+     */
+    private function buildGoogleMetaPayload(array $googleIdentity, array $baseMeta = []): array
+    {
+        $existingGoogleMeta = (array) data_get($baseMeta, 'google', []);
+
+        return array_merge($baseMeta, [
+            'google' => array_merge($existingGoogleMeta, [
+                'email' => $googleIdentity['email'],
+                'name' => $googleIdentity['name'] !== '' ? $googleIdentity['name'] : null,
+                'picture' => $googleIdentity['picture'] !== '' ? $googleIdentity['picture'] : null,
+                'linked_at' => now()->toDateTimeString(),
+            ]),
+        ]);
+    }
+
+    /**
+     * Enforce the current one-account-one-workspace rule for resolved users.
+     */
+    private function ensureSingleWorkspaceMembership(BaseUser $user): ?BaseUser
+    {
+        $membershipCount = UserTenant::query()->where('user_id', $user->id)->count();
+
+        if ($membershipCount > 1) {
+            return $this->throwSingleWorkspaceRequired();
+        }
+
+        return $membershipCount === 1 ? $user : null;
+    }
+
+    /**
      * Resolve base user for credential.
      */
     private function resolveBaseUserForCredential(array $data, bool $failOnAmbiguous = true): ?BaseUser
@@ -449,13 +716,7 @@ class AuthController extends Controller
             return null;
         }
 
-        $membershipCount = UserTenant::query()->where('user_id', $user->id)->count();
-
-        if ($membershipCount > 1) {
-            return $this->throwSingleWorkspaceRequired();
-        }
-
-        return $membershipCount === 1 ? $user : null;
+        return $this->ensureSingleWorkspaceMembership($user);
     }
 
     /**
@@ -560,6 +821,22 @@ class AuthController extends Controller
         $username = trim((string) $username);
 
         return $username !== '' ? Str::lower($username) : null;
+    }
+
+    /**
+     * Resolve OTP delivery channel from the submitted credential.
+     */
+    private function resolveOtpDeliveryChannel(array $data): ?string
+    {
+        if (!empty($this->normalizeEmail($data['email'] ?? null))) {
+            return 'email';
+        }
+
+        if (!empty($data['phone'] ?? null)) {
+            return 'sms';
+        }
+
+        return null;
     }
 
     /**

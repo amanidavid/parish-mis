@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\App\V1\LocationController;
 use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceExpenseController;
 use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceJobController;
 use App\Http\Controllers\Api\App\V1\Maintenance\DailyPropertyExpenseController;
+use App\Http\Controllers\Api\App\V1\Maintenance\DailyExpenseTypeController;
 use App\Http\Controllers\Api\App\V1\Maintenance\MaintenanceReportController;
 use App\Http\Controllers\Api\App\V1\PropertyController;
 use App\Http\Controllers\Api\App\V1\PropertyFloorController;
@@ -108,9 +109,12 @@ Route::prefix('v1')->group(function () {
             Route::prefix('auth')->group(function () {
                 Route::post('register', [AppAuthController::class, 'register'])->middleware('throttle:login');
                 Route::post('login', [AppAuthController::class, 'login'])->middleware('throttle:login');
+                Route::post('google/register', [AppAuthController::class, 'googleRegister'])->middleware('throttle:login');
+                Route::post('google/login', [AppAuthController::class, 'googleLogin'])->middleware('throttle:login');
                 Route::post('verify-otp', [AppAuthController::class, 'verifyOtp'])->middleware('throttle:login');
                 Route::post('forgot-password', [AppAuthController::class, 'forgotPassword'])->middleware('throttle:login');
                 Route::post('reset-password', [AppAuthController::class, 'resetPassword'])->middleware('throttle:login');
+                Route::post('google/link', [AppAuthController::class, 'linkGoogle'])->middleware('jwt.auth');
                 Route::post('change-password', [AppAuthController::class, 'changePassword'])->middleware('jwt.auth');
                 Route::patch('profile', [AppAuthController::class, 'updateProfile'])->middleware('jwt.auth');
                 Route::post('refresh', [AppAuthController::class, 'refresh'])->middleware(['jwt.auth', 'throttle:refresh']);
@@ -166,6 +170,8 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('property-floors', PropertyFloorController::class);
                 Route::apiResource('units', UnitController::class);
                 Route::prefix('maintenance')->group(function () {
+                    Route::apiResource('daily-expense-types', DailyExpenseTypeController::class)
+                        ->parameters(['daily-expense-types' => 'dailyExpenseType']);
                     Route::apiResource('jobs', MaintenanceJobController::class)
                         ->parameters(['jobs' => 'maintenanceJob']);
                     Route::apiResource('expenses', MaintenanceExpenseController::class)

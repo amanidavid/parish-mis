@@ -35,6 +35,12 @@ return [
         ],
     ],
 
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'tokeninfo_endpoint' => env('GOOGLE_TOKENINFO_ENDPOINT', 'https://oauth2.googleapis.com/tokeninfo'),
+        'timeout' => (int) env('GOOGLE_TOKENINFO_TIMEOUT', 10),
+    ],
+
     'sms' => [
         'enabled' => (bool) env('SMS_ENABLED', false),
         'driver' => env('SMS_DRIVER', 'nextsms'),

@@ -20,6 +20,11 @@ class DailyPropertyExpense extends BaseModel
         return $this->belongsTo(Property::class);
     }
 
+    public function expenseType(): BelongsTo
+    {
+        return $this->belongsTo(DailyExpenseType::class, 'expense_type_id');
+    }
+
     public function recordedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'recorded_by');

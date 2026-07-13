@@ -84,7 +84,11 @@ class AuthController extends Controller
         }
 
         try {
-            $otp = $this->otp->create((int) $session->user_id, 'password_reset');
+            $otp = $this->otp->create(
+                (int) $session->user_id,
+                'password_reset',
+                $this->resolveOtpDeliveryChannel($request->validated())
+            );
         } catch (RuntimeException $exception) {
             report($exception);
 
@@ -187,5 +191,15 @@ class AuthController extends Controller
         }
 
         return $query->first();
+    }
+
+    /**
+     * Resolve OTP delivery channel from the submitted credential.
+     */
+    private function resolveOtpDeliveryChannel(array $data): ?string
+    {
+        return !empty(trim((string) ($data['email'] ?? '')))
+            ? 'email'
+            : null;
     }
 }
