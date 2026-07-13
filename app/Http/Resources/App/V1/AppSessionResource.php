@@ -21,6 +21,7 @@ class AppSessionResource extends JsonResource
                 'name' => $this['user']->name,
                 'email' => $this['user']->email,
                 'phone' => $this['user']->phone,
+                'google_linked' => !empty($this['user']->google_subject),
             ],
             'tenant' => $tenants->isNotEmpty() ? new TenantWorkspaceResource($tenants->first()) : null,
             'tenants' => TenantWorkspaceResource::collection($tenants),

@@ -17,6 +17,7 @@ class AppMeResource extends JsonResource
             'name' => $this['base_user']->name,
             'email' => $this['base_user']->email,
             'phone' => $this['base_user']->phone,
+            'google_linked' => !empty($this['base_user']->google_subject),
             'country' => $country ? [
                 'uuid' => $country->uuid,
                 'name' => $country->name,

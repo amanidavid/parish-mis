@@ -15,7 +15,7 @@ class UpdateDailyPropertyExpenseRequest extends FormRequest
     {
         return [
             'property_uuid' => ['sometimes', 'uuid'],
-            'title' => ['sometimes', 'string', 'min:2', 'max:160'],
+            'expense_type_uuid' => ['sometimes', 'uuid'],
             'description' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'amount' => ['sometimes', 'numeric', 'min:0.01'],
             'expense_date' => ['sometimes', 'date'],

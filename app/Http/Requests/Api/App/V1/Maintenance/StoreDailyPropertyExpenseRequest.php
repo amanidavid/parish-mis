@@ -15,7 +15,7 @@ class StoreDailyPropertyExpenseRequest extends FormRequest
     {
         return [
             'property_uuid' => ['required', 'uuid'],
-            'title' => ['required', 'string', 'min:2', 'max:160'],
+            'expense_type_uuid' => ['required', 'uuid'],
             'description' => ['nullable', 'string', 'max:5000'],
             'amount' => ['required', 'numeric', 'min:0.01'],
             'expense_date' => ['nullable', 'date'],

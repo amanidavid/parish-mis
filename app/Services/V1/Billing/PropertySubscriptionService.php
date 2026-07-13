@@ -415,12 +415,12 @@ class PropertySubscriptionService
             ->leftJoin('property_subscriptions', 'property_subscriptions.workspace_property_id', '=', 'workspace_properties.id')
             ->leftJoin('billing_rules', 'billing_rules.id', '=', 'property_subscriptions.billing_rule_id')
             ->whereNull('workspace_properties.property_deleted_at')
-            ->where(function ($builder) {
+            ->where(function ($builder) use ($today) {
                 $builder
                     ->whereNull('property_subscriptions.id')
                     ->orWhere('property_subscriptions.status', PropertySubscription::STATUS_UNSUBSCRIBED)
                     ->orWhere('property_subscriptions.status', PropertySubscription::STATUS_EXPIRED)
-                    ->orWhere(function ($expiredBuilder) {
+                    ->orWhere(function ($expiredBuilder) use ($today) {
                         $expiredBuilder
                             ->where('property_subscriptions.status', PropertySubscription::STATUS_ACTIVE)
                             ->whereNotNull('property_subscriptions.current_period_ends_on')

@@ -12,6 +12,10 @@ class DailyPropertyExpenseResource extends ApiJsonResource
         return [
             'uuid' => $this->uuid,
             'title' => $this->title,
+            'expense_type' => $this->whenLoaded('expenseType', fn () => $this->expenseType ? [
+                'uuid' => $this->expenseType->uuid,
+                'name' => $this->expenseType->name,
+            ] : null),
             'description' => $this->description,
             'amount' => (float) $this->amount,
             'currency' => $this->normalizeCurrency($this->currency),

@@ -8,6 +8,7 @@ use App\Http\Requests\Api\App\V1\Maintenance\DailyPropertyExpenseIndexRequest;
 use App\Http\Requests\Api\App\V1\Maintenance\StoreDailyPropertyExpenseRequest;
 use App\Http\Requests\Api\App\V1\Maintenance\UpdateDailyPropertyExpenseRequest;
 use App\Http\Resources\App\V1\Maintenance\DailyPropertyExpenseResource;
+use App\Models\Tenant\DailyExpenseType;
 use App\Models\Tenant\DailyPropertyExpense;
 use App\Models\Tenant\Property;
 use App\Models\Tenant\User as TenantUser;
@@ -43,6 +44,7 @@ class DailyPropertyExpenseController extends Controller
         $query = DailyPropertyExpense::query()
             ->with([
                 'property:id,uuid,name,currency,status',
+                'expenseType:id,uuid,name',
                 'recordedBy:id,uuid,name,email',
             ]);
 
@@ -59,11 +61,21 @@ class DailyPropertyExpenseController extends Controller
             $query->where('property_id', $property->id);
         }
 
+        if (!empty($filters['expense_type_uuid'] ?? null)) {
+            $expenseType = $this->resolveModelByUuid(DailyExpenseType::class, $filters['expense_type_uuid']);
+            if (!$expenseType) {
+                return ApiResponse::error('Daily expense type not found', ['expense_type_uuid' => ['Invalid daily expense type identifier']], 422);
+            }
+
+            $query->where('expense_type_id', $expenseType->id);
+        }
+
         if (!empty($filters['search'] ?? null)) {
             $search = trim((string) $filters['search']);
             $query->where(function (Builder $innerQuery) use ($search) {
                 $innerQuery
                     ->where('title', 'like', $search.'%')
+                    ->orWhereHas('expenseType', fn (Builder $typeQuery) => $typeQuery->where('name', 'like', $search.'%'))
                     ->orWhereHas('property', fn (Builder $propertyQuery) => $propertyQuery->where('name', 'like', $search.'%'));
             });
         }
@@ -90,11 +102,16 @@ class DailyPropertyExpenseController extends Controller
         if ($property instanceof JsonResponse) {
             return $property;
         }
+        $expenseType = $this->resolveExpenseType((string) $data['expense_type_uuid']);
+        if ($expenseType instanceof JsonResponse) {
+            return $expenseType;
+        }
 
-        $expense = DB::transaction(function () use ($data, $property) {
+        $expense = DB::transaction(function () use ($data, $property, $expenseType) {
             return DailyPropertyExpense::query()->create([
                 'property_id' => $property->id,
-                'title' => $this->normalizeTitle($data['title']),
+                'expense_type_id' => $expenseType->id,
+                'title' => $expenseType->name,
                 'description' => $this->normalizeDescription($data['description'] ?? null),
                 'amount' => $data['amount'],
                 'currency' => $this->resolveExpenseCurrency($property),
@@ -129,15 +146,22 @@ class DailyPropertyExpenseController extends Controller
         $property = array_key_exists('property_uuid', $data)
             ? $this->resolvePropertyForMutation((string) $data['property_uuid'])
             : $dailyPropertyExpense->property;
+        $expenseType = array_key_exists('expense_type_uuid', $data)
+            ? $this->resolveExpenseType((string) $data['expense_type_uuid'])
+            : $dailyPropertyExpense->expenseType;
 
         if ($property instanceof JsonResponse) {
             return $property;
         }
+        if ($expenseType instanceof JsonResponse) {
+            return $expenseType;
+        }
 
-        DB::transaction(function () use ($dailyPropertyExpense, $property, $data) {
+        DB::transaction(function () use ($dailyPropertyExpense, $property, $expenseType, $data) {
             $dailyPropertyExpense->fill([
                 'property_id' => $property->id,
-                'title' => array_key_exists('title', $data) ? $this->normalizeTitle($data['title']) : $dailyPropertyExpense->title,
+                'expense_type_id' => $expenseType?->id,
+                'title' => $expenseType?->name ?? $dailyPropertyExpense->title,
                 'description' => array_key_exists('description', $data) ? $this->normalizeDescription($data['description']) : $dailyPropertyExpense->description,
                 'amount' => $data['amount'] ?? $dailyPropertyExpense->amount,
                 'currency' => $this->resolveExpenseCurrency($property),
@@ -195,14 +219,24 @@ class DailyPropertyExpenseController extends Controller
         return DailyPropertyExpense::query()
             ->with([
                 'property:id,uuid,name,currency,status',
+                'expenseType:id,uuid,name',
                 'recordedBy:id,uuid,name,email',
             ])
             ->findOrFail($dailyPropertyExpense->id);
     }
 
-    private function normalizeTitle(string $value): string
+    private function resolveExpenseType(string $expenseTypeUuid): DailyExpenseType|JsonResponse
     {
-        return Str::of($value)->trim()->squish()->ucfirst()->toString();
+        $expenseType = DailyExpenseType::query()
+            ->select(['id', 'uuid', 'name'])
+            ->where('uuid', $expenseTypeUuid)
+            ->first();
+
+        if (!$expenseType) {
+            return ApiResponse::error('Daily expense type not found', ['expense_type_uuid' => ['Invalid daily expense type identifier']], 422);
+        }
+
+        return $expenseType;
     }
 
     private function normalizeDescription(?string $value): ?string
