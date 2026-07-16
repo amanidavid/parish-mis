@@ -2,6 +2,7 @@
 
 namespace App\Services\V1\Billing;
 
+use App\Jobs\SendPaidPropertyInvoiceEmail;
 use App\Models\Landlord\PropertySubscription;
 use App\Models\Landlord\PropertySubscriptionPayment;
 use App\Models\Landlord\WorkspaceProperty;
@@ -28,7 +29,6 @@ class PropertySubscriptionService
         private WorkspaceBillingRuleService $workspaceBillingRuleService,
         private SubscriptionService $subscriptionService,
         private PropertyInvoiceService $propertyInvoiceService,
-        private PropertyInvoiceEmailService $propertyInvoiceEmailService,
     ) {
     }
 
@@ -276,7 +276,7 @@ class PropertySubscriptionService
         $invoice = $payment->getRelationValue('generatedInvoice');
 
         if ($invoice) {
-            $this->propertyInvoiceEmailService->sendPaidInvoice($invoice);
+            SendPaidPropertyInvoiceEmail::dispatch($invoice->id)->afterCommit();
             $payment->setRelation('generatedInvoice', $invoice->fresh(['workspaceProperty', 'items', 'deliveryLogs']));
         }
 
