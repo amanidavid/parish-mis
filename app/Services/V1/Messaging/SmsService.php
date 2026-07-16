@@ -34,10 +34,12 @@ class SmsService
     public function sendText(string|array $recipients, string $message, ?string $senderId = null, array $context = [], ?string $reference = null): array
     {
         $this->assertConfigured();
+        $normalizedRecipients = $this->normalizeRecipients($recipients);
+        $this->assertSupportedRecipients($normalizedRecipients);
 
         $payload = [
             'from' => $senderId ?: (string) config('services.sms.sender_id'),
-            'to' => $this->normalizeRecipients($recipients),
+            'to' => $normalizedRecipients,
             'text' => trim($message),
             'reference' => $reference ?: $this->buildReference(),
         ];
@@ -65,6 +67,33 @@ class SmsService
             'status_code' => $response->status(),
             'body' => $response->json() ?? $response->body(),
         ];
+    }
+
+    /**
+     * Determine whether a recipient is supported by the configured SMS provider.
+     */
+    public function supportsRecipient(?string $recipient): bool
+    {
+        $recipient = trim((string) $recipient);
+        if ($recipient === '') {
+            return false;
+        }
+
+        try {
+            $normalized = $this->normalizeRecipient($recipient);
+        } catch (SmsDeliveryException) {
+            return false;
+        }
+
+        return $this->isSupportedNormalizedRecipient($normalized);
+    }
+
+    /**
+     * Message for unsupported SMS destination.
+     */
+    public function unsupportedRecipientMessage(): string
+    {
+        return 'SMS delivery is available only for Tanzania phone numbers right now.';
     }
 
     /**
@@ -149,6 +178,18 @@ class SmsService
     }
 
     /**
+     * Assert that recipients are supported by the configured SMS provider.
+     */
+    private function assertSupportedRecipients(array $recipients): void
+    {
+        foreach ($recipients as $recipient) {
+            if (!$this->isSupportedNormalizedRecipient($recipient)) {
+                throw new SmsDeliveryException($this->unsupportedRecipientMessage());
+            }
+        }
+    }
+
+    /**
      * Normalize a single recipient for SMS delivery.
      */
     private function normalizeRecipient(string $recipient): string
@@ -182,6 +223,25 @@ class SmsService
         }
 
         return '+'.$digits;
+    }
+
+    /**
+     * Determine whether the normalized recipient is allowed for the current provider.
+     */
+    private function isSupportedNormalizedRecipient(string $recipient): bool
+    {
+        $supportedPrefixes = config('services.sms.supported_prefixes', ['+255']);
+        $supportedPrefixes = is_array($supportedPrefixes) ? $supportedPrefixes : ['+255'];
+
+        foreach ($supportedPrefixes as $prefix) {
+            $prefix = trim((string) $prefix);
+
+            if ($prefix !== '' && str_starts_with($recipient, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

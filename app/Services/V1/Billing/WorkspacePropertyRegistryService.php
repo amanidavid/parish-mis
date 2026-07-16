@@ -10,6 +10,7 @@ use App\Support\Tenancy\TenantConnectionManager;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use InvalidArgumentException;
 
 class WorkspacePropertyRegistryService
@@ -239,6 +240,8 @@ class WorkspacePropertyRegistryService
                 ]
             );
 
+            $this->assignMissingTenantPropertySequences($tenant->id);
+
             $workspaceProperties = WorkspaceProperty::query()
                 ->where('tenant_id', $tenant->id)
                 ->whereIn('property_uuid', array_column($payload, 'property_uuid'))
@@ -309,5 +312,35 @@ class WorkspacePropertyRegistryService
         }
 
         return Carbon::parse($value)->format('Y-m-d H:i:s');
+    }
+
+    private function assignMissingTenantPropertySequences(int $tenantId): void
+    {
+        if (!Schema::connection('base')->hasColumn('workspace_properties', 'tenant_property_sequence')) {
+            return;
+        }
+
+        $nextSequence = (int) WorkspaceProperty::query()
+            ->where('tenant_id', $tenantId)
+            ->max('tenant_property_sequence');
+
+        WorkspaceProperty::query()
+            ->where('tenant_id', $tenantId)
+            ->whereNull('tenant_property_sequence')
+            ->orderByRaw('COALESCE(property_created_at, created_at) asc')
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get(['id'])
+            ->each(function (WorkspaceProperty $workspaceProperty) use (&$nextSequence) {
+                $nextSequence++;
+
+                WorkspaceProperty::query()
+                    ->whereKey($workspaceProperty->id)
+                    ->update([
+                        'tenant_property_sequence' => $nextSequence,
+                        'updated_at' => now(),
+                    ]);
+            });
     }
 }

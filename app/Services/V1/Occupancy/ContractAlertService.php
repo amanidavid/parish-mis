@@ -192,16 +192,39 @@ class ContractAlertService
                                 continue;
                             }
 
+                            $effectiveChannel = $channel;
+                            $effectiveAddress = $address;
+
+                            if ($channel === 'sms' && !$this->smsService->supportsRecipient($address)) {
+                                $fallbackEmail = trim((string) ($recipient['email'] ?? ''));
+
+                                if ($fallbackEmail !== '') {
+                                    $effectiveChannel = 'email';
+                                    $effectiveAddress = $fallbackEmail;
+                                    $logKey = $this->logKey(
+                                        (int) $contract->contract_id,
+                                        (string) $contract->end_date,
+                                        $eventType,
+                                        $effectiveChannel,
+                                        $recipient['recipient_key']
+                                    );
+
+                                    if (($existingLogs[$logKey]['status'] ?? null) === 'success') {
+                                        continue;
+                                    }
+                                }
+                            }
+
                             $result = $this->dispatchAlertWithRetry(function () use (
-                                $channel,
-                                $address,
+                                $effectiveChannel,
+                                $effectiveAddress,
                                 $subject,
                                 $message,
                                 $recipient,
                                 $contract,
                                 $eventType
                             ): void {
-                                $this->dispatchChannel($channel, $address, $subject, $message, $recipient, $contract, $eventType);
+                                $this->dispatchChannel($effectiveChannel, $effectiveAddress, $subject, $message, $recipient, $contract, $eventType);
                             }, 'contract_alerts');
 
                             if ($result['status'] === 'success') {
@@ -213,9 +236,9 @@ class ContractAlertService
                             $this->upsertLog(
                                 $contract,
                                 $recipient,
-                                $channel,
+                                $effectiveChannel,
                                 $eventType,
-                                $address,
+                                $effectiveAddress,
                                 $subject,
                                 $result['status'],
                                 $result['error'],

@@ -4,6 +4,7 @@ namespace App\Services\V1\Occupancy;
 
 use App\Models\Tenant\User;
 use App\Services\V1\PropertyAssignmentAccessService;
+use Illuminate\Database\ConnectionInterface;
 use Illuminate\Support\Facades\DB;
 
 class ContractAlertRecipientResolver
@@ -45,8 +46,9 @@ class ContractAlertRecipientResolver
 
         $eligibleUsers = $this->distinctUserIdsByPermissionsQuery($permissionNames);
         $bypassUsers = $this->distinctUserIdsByPermissionsQuery([PropertyAssignmentAccessService::BYPASS_PERMISSION]);
+        $connection = $this->connection();
 
-        $assignedRows = DB::table('users')
+        $assignedRows = $connection->table('users')
             ->joinSub($eligibleUsers, 'eligible_users', fn ($join) => $join->on('eligible_users.model_id', '=', 'users.id'))
             ->join('staff_property_assignments', 'staff_property_assignments.user_id', '=', 'users.id')
             ->where('users.status', 'active')
@@ -62,7 +64,7 @@ class ContractAlertRecipientResolver
             ->distinct()
             ->get();
 
-        $globalRows = DB::table('users')
+        $globalRows = $connection->table('users')
             ->joinSub($eligibleUsers, 'eligible_users', fn ($join) => $join->on('eligible_users.model_id', '=', 'users.id'))
             ->joinSub($bypassUsers, 'bypass_users', fn ($join) => $join->on('bypass_users.model_id', '=', 'users.id'))
             ->where('users.status', 'active')
@@ -107,19 +109,20 @@ class ContractAlertRecipientResolver
             static fn (string $permission): string => trim($permission),
             $permissionNames
         )));
+        $connection = $this->connection();
 
         if ($permissionNames === []) {
-            return DB::table('users')->whereRaw('1 = 0')->selectRaw('id as model_id');
+            return $connection->table('users')->whereRaw('1 = 0')->selectRaw('id as model_id');
         }
 
-        $directPermissions = DB::table('model_has_permissions')
+        $directPermissions = $connection->table('model_has_permissions')
             ->join('permissions', 'permissions.id', '=', 'model_has_permissions.permission_id')
             ->where('model_has_permissions.model_type', User::class)
             ->where('permissions.guard_name', 'api')
             ->whereIn('permissions.name', $permissionNames)
             ->select('model_has_permissions.model_id');
 
-        $rolePermissions = DB::table('model_has_roles')
+        $rolePermissions = $connection->table('model_has_roles')
             ->join('role_has_permissions', 'role_has_permissions.role_id', '=', 'model_has_roles.role_id')
             ->join('permissions', 'permissions.id', '=', 'role_has_permissions.permission_id')
             ->where('model_has_roles.model_type', User::class)
@@ -127,10 +130,15 @@ class ContractAlertRecipientResolver
             ->whereIn('permissions.name', $permissionNames)
             ->select('model_has_roles.model_id');
 
-        return DB::query()
+        return $connection->query()
             ->fromSub($directPermissions->union($rolePermissions), 'permission_user_ids')
             ->select('model_id')
             ->distinct();
+    }
+
+    private function connection(): ConnectionInterface
+    {
+        return DB::connection((new User())->getConnectionName());
     }
 
     /**

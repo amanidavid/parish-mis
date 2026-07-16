@@ -77,15 +77,38 @@ class WorkspaceTrialAlertService
                     continue;
                 }
 
+                $effectiveChannel = $channel;
+                $effectiveAddress = $address;
+
+                if ($channel === 'sms' && !$this->smsService->supportsRecipient($address)) {
+                    $fallbackEmail = trim((string) ($row->recipient_email ?? ''));
+
+                    if ($fallbackEmail !== '') {
+                        $effectiveChannel = 'email';
+                        $effectiveAddress = $fallbackEmail;
+                        $logKey = $this->logKey(
+                            (int) $row->subscription_id,
+                            (string) $row->trial_ends_at,
+                            $eventType,
+                            $effectiveChannel,
+                            (string) $row->recipient_key
+                        );
+
+                        if (($existingLogs[$logKey]['status'] ?? null) === 'success') {
+                            continue;
+                        }
+                    }
+                }
+
                 $result = $this->dispatchAlertWithRetry(function () use (
-                    $channel,
-                    $address,
+                    $effectiveChannel,
+                    $effectiveAddress,
                     $subject,
                     $message,
                     $row,
                     $eventType
                 ): void {
-                    $this->dispatchChannel($channel, $address, $subject, $message, $row, $eventType);
+                    $this->dispatchChannel($effectiveChannel, $effectiveAddress, $subject, $message, $row, $eventType);
                 }, 'workspace_trial_alerts');
 
                 if ($result['status'] === 'success') {
@@ -96,8 +119,8 @@ class WorkspaceTrialAlertService
                 $existingAttempts = (int) ($existingLogs[$logKey]['attempts_count'] ?? 0);
                 $this->upsertLog(
                     $row,
-                    $channel,
-                    $address,
+                    $effectiveChannel,
+                    $effectiveAddress,
                     $subject,
                     $eventType,
                     $result['status'],

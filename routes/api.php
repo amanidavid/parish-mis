@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\Admin\V1\DashboardController as AdminDashboardContr
 use App\Http\Controllers\Api\Admin\V1\TenantController;
 use App\Http\Controllers\Api\App\V1\AccessControlController;
 use App\Http\Controllers\Api\App\V1\AuthController as AppAuthController;
+use App\Http\Controllers\Api\App\V1\Billing\PropertyInvoiceController;
 use App\Http\Controllers\Api\App\V1\CustomerContractController;
 use App\Http\Controllers\Api\App\V1\CustomerController;
 use App\Http\Controllers\Api\App\V1\ContractReportController;
@@ -167,6 +168,11 @@ Route::prefix('v1')->group(function () {
                 });
                 Route::apiResource('property-types', PropertyTypeController::class);
                 Route::apiResource('properties', PropertyController::class);
+                Route::prefix('properties/{property}')->group(function () {
+                    Route::get('invoices', [PropertyInvoiceController::class, 'index']);
+                    Route::get('invoices/{invoiceUuid}/preview', [PropertyInvoiceController::class, 'preview']);
+                    Route::get('invoices/{invoiceUuid}/download', [PropertyInvoiceController::class, 'download']);
+                });
                 Route::apiResource('property-floors', PropertyFloorController::class);
                 Route::apiResource('units', UnitController::class);
                 Route::prefix('maintenance')->group(function () {
