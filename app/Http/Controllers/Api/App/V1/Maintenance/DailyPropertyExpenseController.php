@@ -20,6 +20,7 @@ use App\Support\ApiMessages;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
@@ -80,7 +81,12 @@ class DailyPropertyExpenseController extends Controller
             });
         }
 
-        if (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null)) {
+        if (($filters['date_filter'] ?? null) === 'last_30_days') {
+            $query->whereBetween('expense_date', [
+                Carbon::today()->subDays(29)->toDateString(),
+                Carbon::today()->toDateString(),
+            ]);
+        } elseif (!empty($filters['start_date'] ?? null) || !empty($filters['end_date'] ?? null)) {
             $startDate = $filters['start_date'] ?? $filters['end_date'];
             $endDate = $filters['end_date'] ?? $filters['start_date'];
             $query->whereBetween('expense_date', [$startDate, $endDate]);

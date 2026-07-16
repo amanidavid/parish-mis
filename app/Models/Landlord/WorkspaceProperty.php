@@ -15,6 +15,7 @@ class WorkspaceProperty extends BaseModel
     protected $table = 'workspace_properties';
 
     protected $casts = [
+        'tenant_property_sequence' => 'integer',
         'property_created_at' => 'datetime',
         'property_updated_at' => 'datetime',
         'property_deleted_at' => 'datetime',

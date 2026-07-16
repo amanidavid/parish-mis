@@ -10,6 +10,7 @@ class PropertySubscriptionPaymentResource extends ApiJsonResource
     public function toArray(Request $request): array
     {
         $currency = $this->currency;
+        $invoice = $this->getRelationValue('generatedInvoice');
 
         return [
             'uuid' => $this->uuid,
@@ -54,6 +55,22 @@ class PropertySubscriptionPaymentResource extends ApiJsonResource
                 'effective_from' => $this->billingRule->effective_from?->toDateString(),
                 'effective_to' => $this->billingRule->effective_to?->toDateString(),
                 'scope' => 'global_default',
+            ] : null,
+            'invoice' => $invoice ? [
+                'uuid' => $invoice->uuid,
+                'invoice_number' => $invoice->invoice_number,
+                'status' => $invoice->status,
+                'issue_date' => optional($invoice->issue_date)->toDateString(),
+                'due_date' => optional($invoice->due_date)->toDateString(),
+                'currency' => $invoice->currency,
+                'total_amount_cents' => (int) $invoice->total_amount_cents,
+                'balance_amount_cents' => (int) $invoice->balance_amount_cents,
+                'delivery' => [
+                    'status' => $invoice->sent_at ? 'sent' : 'pending',
+                    'last_sent_at' => optional($invoice->sent_at)->format('Y-m-d H:i:s'),
+                ],
+                'preview_url' => url('/api/v1/app/properties/'.$invoice->property_uuid.'/invoices/'.$invoice->uuid.'/preview'),
+                'download_url' => url('/api/v1/app/properties/'.$invoice->property_uuid.'/invoices/'.$invoice->uuid.'/download'),
             ] : null,
             ...$this->timestamps(),
         ];

@@ -2,6 +2,7 @@
 
 namespace App\Services\V1\Billing;
 
+use App\Models\Landlord\PropertyInvoice;
 use App\Models\Landlord\PropertySubscription;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Concerns\DispatchesAlertsWithRetry;
@@ -31,6 +32,8 @@ class PropertySubAlertService
         private ContractAlertRecipientResolver $recipientResolver,
         private SmsService $smsService,
         private TenantProvisioningService $tenantProvisioningService,
+        private PropertyInvoiceService $propertyInvoiceService,
+        private PropertyInvoiceEmailService $propertyInvoiceEmailService,
     ) {
     }
 
@@ -117,7 +120,19 @@ class PropertySubAlertService
                         continue;
                     }
 
-                    [$subject, $message] = $this->buildMessage($subscription, $eventType);
+                    $invoice = $this->propertyInvoiceService->ensureInvoiceForUpcomingPeriod(
+                        $tenant,
+                        (int) $subscription->workspace_property_id,
+                        (int) $subscription->subscription_id,
+                        (string) $subscription->current_period_ends_on,
+                        [
+                            'tenant_full_name' => $subscription->recipient_name ?? ($tenant->display_name ?: $tenant->name),
+                            'tenant_email' => $subscription->recipient_email ?? null,
+                            'tenant_phone' => $subscription->recipient_phone ?? null,
+                        ]
+                    );
+
+                    [$subject, $message] = $this->buildMessage($subscription, $invoice, $eventType);
 
                     foreach (($staffRecipients[(int) $tenantPropertyId] ?? []) as $recipient) {
                         foreach ($enabledChannels as $channel) {
@@ -141,20 +156,57 @@ class PropertySubAlertService
                                 continue;
                             }
 
+                            $effectiveChannel = $channel;
+                            $effectiveAddress = $address;
+
+                            if ($channel === 'sms' && !$this->smsService->supportsRecipient($address)) {
+                                $fallbackEmail = trim((string) ($recipient['email'] ?? ''));
+
+                                if ($fallbackEmail !== '') {
+                                    $effectiveChannel = 'email';
+                                    $effectiveAddress = $fallbackEmail;
+                                    $logKey = $this->logKey(
+                                        (int) $subscription->subscription_id,
+                                        (string) $subscription->current_period_ends_on,
+                                        $eventType,
+                                        $effectiveChannel,
+                                        $recipient['recipient_key']
+                                    );
+
+                                    if (($existingLogs[$logKey]['status'] ?? null) === 'success') {
+                                        continue;
+                                    }
+                                }
+                            }
+
                             $result = $this->dispatchAlertWithRetry(function () use (
-                                $channel,
-                                $address,
+                                $effectiveChannel,
+                                $effectiveAddress,
                                 $subject,
                                 $message,
                                 $recipient,
                                 $subscription,
-                                $eventType
+                                $eventType,
+                                $invoice
                             ): void {
-                                $this->dispatchChannel($channel, $address, $subject, $message, $recipient, $subscription, $eventType);
+                                $this->dispatchChannel($effectiveChannel, $effectiveAddress, $subject, $message, $recipient, $subscription, $eventType, $invoice);
                             }, 'property_subscription_alerts');
 
                             if ($result['status'] === 'success') {
                                 $sentAlerts++;
+                            }
+
+                            if ($effectiveChannel === 'sms') {
+                                $this->propertyInvoiceService->markInvoiceDelivery(
+                                    $invoice,
+                                    $effectiveChannel,
+                                    $result['status'] === 'success' ? 'sent' : 'failed',
+                                    $effectiveAddress,
+                                    $recipient['name'] ?? null,
+                                    $subject,
+                                    $message,
+                                    ['kind' => 'invoice_reminder_sms']
+                                );
                             }
 
                             $existingUuid = $existingLogs[$logKey]['uuid'] ?? null;
@@ -163,9 +215,9 @@ class PropertySubAlertService
                                 $tenant,
                                 $subscription,
                                 $recipient,
-                                $channel,
+                                $effectiveChannel,
                                 $eventType,
-                                $address,
+                                $effectiveAddress,
                                 $subject,
                                 $result['status'],
                                 $result['error'],
@@ -210,6 +262,12 @@ class PropertySubAlertService
     {
         return DB::connection('base')->table('property_subscriptions')
             ->join('workspace_properties', 'workspace_properties.id', '=', 'property_subscriptions.workspace_property_id')
+            ->leftJoin('user_tenants', function ($join) use ($tenant) {
+                $join->on('user_tenants.tenant_id', '=', 'property_subscriptions.tenant_id')
+                    ->where('user_tenants.tenant_id', '=', $tenant->id)
+                    ->where('user_tenants.is_owner', true);
+            })
+            ->leftJoin('users', 'users.id', '=', 'user_tenants.user_id')
             ->select([
                 'property_subscriptions.id as subscription_id',
                 'property_subscriptions.uuid as subscription_uuid',
@@ -217,6 +275,9 @@ class PropertySubAlertService
                 'property_subscriptions.current_period_ends_on',
                 'workspace_properties.property_uuid',
                 'workspace_properties.property_name',
+                'users.name as recipient_name',
+                'users.email as recipient_email',
+                'users.phone as recipient_phone',
             ])
             ->where('property_subscriptions.tenant_id', $tenant->id)
             ->where('workspace_properties.tenant_id', $tenant->id)
@@ -239,23 +300,25 @@ class PropertySubAlertService
             ->all();
     }
 
-    private function buildMessage(object $subscription, string $eventType): array
+    private function buildMessage(object $subscription, PropertyInvoice $invoice, string $eventType): array
     {
-        $endDate = Carbon::parse((string) $subscription->current_period_ends_on)->format('Y-m-d');
-        $subject = $eventType === self::EVENT_EXPIRING_SOON
-            ? 'Property Subscription Expiring Soon'
-            : 'Property Subscription Ends Today';
+        $dueDate = $invoice->due_date?->format('Y-m-d');
+        $formattedAmount = sprintf('%s %s', $invoice->currency, number_format((int) $invoice->total_amount_cents));
+        $subject = sprintf('Invoice %s for %s', $invoice->invoice_number, $subscription->property_name);
 
         $message = $eventType === self::EVENT_EXPIRING_SOON
             ? sprintf(
-                'Property subscription for %s will expire on %s. Please renew before the coverage ends.',
+                'Invoice %s for %s is ready. Amount due: %s. Due date: %s.',
+                $invoice->invoice_number,
                 $subscription->property_name,
-                $endDate
+                $formattedAmount,
+                $dueDate
             )
             : sprintf(
-                'Property subscription for %s ends today on %s. Please renew to avoid access interruption.',
+                'Invoice %s for %s is due today. Amount due: %s.',
+                $invoice->invoice_number,
                 $subscription->property_name,
-                $endDate
+                $formattedAmount
             );
 
         return [$subject, $message];
@@ -268,7 +331,8 @@ class PropertySubAlertService
         string $message,
         array $recipient,
         object $subscription,
-        string $eventType
+        string $eventType,
+        PropertyInvoice $invoice
     ): void {
         if ($channel === 'sms') {
             $this->smsService->sendText($address, $message, null, [
@@ -282,18 +346,13 @@ class PropertySubAlertService
             return;
         }
 
-        Mail::raw($this->formatEmailMessage($message), function ($mail) use ($address, $recipient, $subject) {
-            $mail->to($address, (string) ($recipient['name'] ?? 'Recipient'))
-                ->subject($subject);
-        });
-    }
-
-    private function formatEmailMessage(string $message): string
-    {
-        return "Hello,\n\n"
-            .$message
-            ."\n\nPlease do not reply to this email. This mailbox is not monitored."
-            ."\n\nRegards,\nZABA Team";
+        $this->propertyInvoiceEmailService->sendReminderInvoice(
+            $invoice,
+            $address,
+            $recipient['name'] ?? null,
+            $subject,
+            $message
+        );
     }
 
     private function existingLogs(array $subscriptionIds, string $eventType): array

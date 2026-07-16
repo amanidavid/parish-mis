@@ -135,7 +135,11 @@ class TenantUserController extends Controller
         $this->authorize('update', $tenantUser);
 
         if ($tenantUser->hasRole('owner')) {
-            return ApiResponse::error('Tenant staff update failed', ['staff' => ['Owner account cannot be updated through the staff endpoint']], 422);
+            return ApiResponse::error(
+                'Owner account cannot be updated.',
+                ['staff' => ['Owner account cannot be updated through the staff endpoint']],
+                422
+            );
         }
 
         $tenantUser->loadMissing('baseUser');
@@ -146,18 +150,31 @@ class TenantUserController extends Controller
         $newEmail = array_key_exists('email', $data) ? $data['email'] : $tenantUser->email;
         $newUsername = isset($data['username']) ? trim((string) $data['username']) : null;
 
-        $tenantConflict = User::query()
-            ->where(function ($query) use ($newPhone, $newEmail) {
-                $query->where('phone', $newPhone);
-                if (!empty($newEmail)) {
-                    $query->orWhere('email', $newEmail);
-                }
-            })
+        $phoneConflict = User::query()
+            ->where('phone', $newPhone)
             ->whereKeyNot($tenantUser->id)
             ->exists();
 
-        if ($tenantConflict) {
-            return ApiResponse::error('Tenant staff update failed', ['staff' => ['Phone or email already belongs to another staff account in this workspace']], 422);
+        if ($phoneConflict) {
+            return ApiResponse::error(
+                'Phone is already in use.',
+                ['phone' => ['Phone already belongs to another staff account in this workspace']],
+                422
+            );
+        }
+
+        $emailConflict = !empty($newEmail)
+            && User::query()
+                ->where('email', $newEmail)
+                ->whereKeyNot($tenantUser->id)
+                ->exists();
+
+        if ($emailConflict) {
+            return ApiResponse::error(
+                'Email is already in use.',
+                ['email' => ['Email already belongs to another staff account in this workspace']],
+                422
+            );
         }
 
         if ($baseUser && $newUsername !== null && $newUsername !== '' && BaseUser::query()
@@ -218,7 +235,7 @@ class TenantUserController extends Controller
             });
         } catch (\InvalidArgumentException $e) {
             return ApiResponse::error(
-                'Staff account could not be updated.',
+                $this->resolveStaffUpdateMessage($e->getMessage()),
                 $this->mapStaffProvisioningError($e->getMessage()),
                 422
             );
@@ -310,6 +327,19 @@ class TenantUserController extends Controller
             default => [
                 'staff' => ['Please review the submitted staff details and try again.'],
             ],
+        };
+    }
+
+    /**
+     * Resolve a human-readable top-level update failure message.
+     */
+    private function resolveStaffUpdateMessage(string $message): string
+    {
+        return match ($message) {
+            'Owner role cannot be assigned through the staff endpoint.' => 'Owner role cannot be assigned.',
+            'One or more tenant roles are invalid.' => 'One or more roles are invalid.',
+            'The selected username is already in use.' => 'Username is already in use.',
+            default => 'Staff account could not be updated.',
         };
     }
 }

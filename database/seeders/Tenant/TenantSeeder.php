@@ -37,8 +37,10 @@ class TenantSeeder extends Seeder
             'daily_property_expenses.view','daily_property_expenses.create','daily_property_expenses.update','daily_property_expenses.delete',
             'renters.view','renters.create','renters.update',
             'leases.view','leases.create','leases.update',
-            'invoices.view','invoices.create',
-            'payments.record','reports.view','staff.manage','roles.manage',
+            'property_invoices.view','property_invoices.download',
+            'payments.record','reports.view',
+            'staff.manage','staff.view','staff.create','staff.update','staff.delete',
+            'roles.manage',
             'staff_property_assignments.view','staff_property_assignments.create',
             'staff_property_assignments.update','staff_property_assignments.delete',
         ];
@@ -80,15 +82,48 @@ class TenantSeeder extends Seeder
             'daily_property_expenses.view', 'daily_property_expenses.create', 'daily_property_expenses.update',
             'renters.view', 'renters.create',
             'leases.view', 'leases.create',
+            'property_invoices.view', 'property_invoices.download',
             'reports.view',
             'staff_property_assignments.view', 'staff_property_assignments.create', 'staff_property_assignments.update',
-            'staff.manage'
         ] as $name) {
             if (isset($permissionIds[$name])) {
                 DB::table('role_has_permissions')->insertOrIgnore([
                     'permission_id' => $permissionIds[$name],
                     'role_id' => $managerRoleId,
                 ]);
+            }
+        }
+
+        $staffPermissionIds = collect([
+            'staff.manage',
+            'staff.view',
+            'staff.create',
+            'staff.update',
+            'staff.delete',
+        ])->map(fn ($name) => $permissionIds[$name] ?? null)
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($managerRoleId && $staffPermissionIds !== []) {
+            DB::table('role_has_permissions')
+                ->where('role_id', $managerRoleId)
+                ->whereIn('permission_id', $staffPermissionIds)
+                ->delete();
+
+            $managerUserIds = DB::table('model_has_roles')
+                ->where('role_id', $managerRoleId)
+                ->where('model_type', \App\Models\Tenant\User::class)
+                ->pluck('model_id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($managerUserIds !== []) {
+                DB::table('model_has_permissions')
+                    ->where('model_type', \App\Models\Tenant\User::class)
+                    ->whereIn('model_id', $managerUserIds)
+                    ->whereIn('permission_id', $staffPermissionIds)
+                    ->delete();
             }
         }
 

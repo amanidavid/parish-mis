@@ -27,6 +27,8 @@ class PropertySubscriptionService
         private PropertySubscriptionAccessService $propertySubscriptionAccessService,
         private WorkspaceBillingRuleService $workspaceBillingRuleService,
         private SubscriptionService $subscriptionService,
+        private PropertyInvoiceService $propertyInvoiceService,
+        private PropertyInvoiceEmailService $propertyInvoiceEmailService,
     ) {
     }
 
@@ -177,7 +179,7 @@ class PropertySubscriptionService
         $billingRule = $this->workspaceBillingRuleService->requireActiveRule($paymentDate);
         $monthsPaid = (int) $payload['months_paid'];
 
-        return DB::connection('base')->transaction(function () use ($tenant, $workspaceProperty, $billingRule, $paymentDate, $monthsPaid, $payload, $adminUser) {
+        $payment = DB::connection('base')->transaction(function () use ($tenant, $workspaceProperty, $billingRule, $paymentDate, $monthsPaid, $payload, $adminUser) {
             $lockedProperty = WorkspaceProperty::query()
                 ->whereKey($workspaceProperty->id)
                 ->lockForUpdate()
@@ -204,6 +206,19 @@ class PropertySubscriptionService
             $coverage = $this->resolveCoverage($tenant, $subscription, $paymentDate, $monthsPaid);
             $unitCount = (int) $lockedProperty->current_registered_units_total;
             $monthlyPrice = $this->workspaceBillingRuleService->calculateMonthlyCharge($unitCount, $billingRule);
+            $this->guardAgainstDuplicatePayment(
+                $tenant,
+                $lockedProperty,
+                $subscription,
+                $paymentDate,
+                $monthsPaid,
+                $monthlyPrice,
+                $billingRule->currency ?? 'TZS',
+                $coverage,
+                $payload,
+                $adminUser
+            );
+
             $payment = PropertySubscriptionPayment::query()->create([
                 'tenant_id' => $tenant->id,
                 'workspace_property_id' => $lockedProperty->id,
@@ -238,12 +253,102 @@ class PropertySubscriptionService
                 'expired_on' => null,
             ])->save();
 
-            return $payment->load([
+            $invoice = $this->propertyInvoiceService->ensurePaidInvoiceForPayment(
+                $tenant,
+                $lockedProperty,
+                $subscription,
+                $billingRule,
+                $payment
+            );
+            $this->propertyInvoiceService->markInvoicePaidForPayment($payment);
+
+            $payment = $payment->load([
                 'workspaceProperty.subscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
                 'propertySubscription.billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
                 'billingRule:id,uuid,billing_profile_id,unit_price_cents,currency,status,effective_from,effective_to',
             ]);
+
+            $payment->setRelation('generatedInvoice', $invoice);
+
+            return $payment;
         });
+
+        $invoice = $payment->getRelationValue('generatedInvoice');
+
+        if ($invoice) {
+            $this->propertyInvoiceEmailService->sendPaidInvoice($invoice);
+            $payment->setRelation('generatedInvoice', $invoice->fresh(['workspaceProperty', 'items', 'deliveryLogs']));
+        }
+
+        return $payment;
+    }
+
+    private function guardAgainstDuplicatePayment(
+        Tenant $tenant,
+        WorkspaceProperty $workspaceProperty,
+        PropertySubscription $subscription,
+        CarbonInterface $paymentDate,
+        int $monthsPaid,
+        int $monthlyPrice,
+        string $currency,
+        array $coverage,
+        array $payload,
+        ?object $adminUser = null
+    ): void {
+        $coverageStartsOn = $coverage['starts_on']->toDateString();
+        $coverageEndsOn = $coverage['ends_on']->toDateString();
+
+        $exactCoveragePayment = PropertySubscriptionPayment::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('workspace_property_id', $workspaceProperty->id)
+            ->whereDate('coverage_starts_on', $coverageStartsOn)
+            ->whereDate('coverage_ends_on', $coverageEndsOn)
+            ->lockForUpdate()
+            ->first();
+
+        if ($exactCoveragePayment) {
+            throw new InvalidArgumentException(sprintf(
+                'A payment already exists for %s covering %s to %s.',
+                $workspaceProperty->property_name,
+                $coverageStartsOn,
+                $coverageEndsOn
+            ));
+        }
+
+        $referenceNumber = trim((string) ($payload['reference_number'] ?? ''));
+        $recentDuplicateQuery = PropertySubscriptionPayment::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('workspace_property_id', $workspaceProperty->id)
+            ->whereDate('payment_date', $paymentDate->toDateString())
+            ->where('months_paid', $monthsPaid)
+            ->where('monthly_price_cents', $monthlyPrice)
+            ->where('total_amount_cents', $monthlyPrice * $monthsPaid)
+            ->where('currency', $currency)
+            ->where('created_at', '>=', now()->subMinutes(10))
+            ->lockForUpdate();
+
+        if ($adminUser?->id) {
+            $recentDuplicateQuery->where('recorded_by_user_id', $adminUser->id);
+        } else {
+            $recentDuplicateQuery->whereNull('recorded_by_user_id');
+        }
+
+        if ($referenceNumber !== '') {
+            $recentDuplicateQuery->where('reference_number', $referenceNumber);
+        } else {
+            $recentDuplicateQuery->where(function ($query) {
+                $query->whereNull('reference_number')->orWhere('reference_number', '');
+            });
+        }
+
+        $recentDuplicatePayment = $recentDuplicateQuery->first();
+
+        if ($recentDuplicatePayment) {
+            throw new InvalidArgumentException(sprintf(
+                'A payment for %s was already recorded a moment ago. Refresh the page before trying again.',
+                $workspaceProperty->property_name
+            ));
+        }
     }
 
     /**

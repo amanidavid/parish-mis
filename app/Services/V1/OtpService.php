@@ -177,6 +177,22 @@ class OtpService
                 throw new RuntimeException('OTP could not be sent because the user has no phone number.');
             }
 
+            if (!$this->smsService->supportsRecipient((string) $user->phone)) {
+                if (blank($user->email)) {
+                    throw new RuntimeException(
+                        $this->smsService->unsupportedRecipientMessage()
+                        .' Add an email address to receive your OTP.'
+                    );
+                }
+
+                $token->channel = 'email';
+                $token->save();
+
+                $this->deliverEmailOtp($user, $replacements);
+
+                return;
+            }
+
             $message = strtr((string) config('otp.sms_template'), $replacements);
 
             $this->smsService->sendText((string) $user->phone, $message, null, [
@@ -192,13 +208,7 @@ class OtpService
             throw new RuntimeException('OTP could not be sent because the user has no email address.');
         }
 
-        $subject = strtr((string) config('otp.email_subject'), $replacements);
-        $message = strtr((string) config('otp.email_template'), $replacements);
-
-        Mail::raw($this->formatEmailMessage($message), function ($mail) use ($user, $subject) {
-            $mail->to((string) $user->email, (string) ($user->name ?? 'User'))
-                ->subject($subject);
-        });
+        $this->deliverEmailOtp($user, $replacements);
     }
 
     /**
@@ -208,5 +218,19 @@ class OtpService
     {
         return $message
             ."\n\nPlease do not reply to this email. This mailbox is not monitored.";
+    }
+
+    /**
+     * Deliver OTP by email.
+     */
+    private function deliverEmailOtp(BaseUser $user, array $replacements): void
+    {
+        $subject = strtr((string) config('otp.email_subject'), $replacements);
+        $message = strtr((string) config('otp.email_template'), $replacements);
+
+        Mail::raw($this->formatEmailMessage($message), function ($mail) use ($user, $subject) {
+            $mail->to((string) $user->email, (string) ($user->name ?? 'User'))
+                ->subject($subject);
+        });
     }
 }
