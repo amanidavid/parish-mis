@@ -3,6 +3,7 @@
 namespace App\Services\V1\Billing;
 
 use App\Models\Landlord\PropertyInvoice;
+use App\Models\Landlord\PropertyInvoiceDeliveryLog;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Occupancy\ContractAlertRecipientResolver;
 use App\Support\Tenancy\TenantConnectionManager;
@@ -14,8 +15,15 @@ use Throwable;
 
 class PropertyInvoiceEmailService
 {
-    private const KIND_PAID = 'paid_invoice_email';
-    private const KIND_REMINDER = 'invoice_reminder_email';
+    /**
+     * @var array<string, array<int, array<string, mixed>>>
+     */
+    private array $recipientCache = [];
+
+    /**
+     * @var array<string, array<string, bool>>
+     */
+    private array $successfulDeliveryCache = [];
 
     public function __construct(
         private PropertyInvoicePdfService $propertyInvoicePdfService,
@@ -43,7 +51,10 @@ class PropertyInvoiceEmailService
             ucfirst((string) $invoice->status)
         );
 
-        $recipients = $this->resolveInvoiceRecipients($invoice);
+        $recipients = collect($this->resolveReminderRecipients($invoice))
+            ->filter(fn (array $recipient) => trim((string) ($recipient['email'] ?? '')) !== '')
+            ->values()
+            ->all();
 
         if ($recipients === []) {
             $this->propertyInvoiceService->markInvoiceDelivery(
@@ -54,7 +65,7 @@ class PropertyInvoiceEmailService
                 null,
                 $subject,
                 'Invoice email could not be sent because no matching staff email was found.',
-                ['kind' => self::KIND_PAID]
+                ['kind' => PropertyInvoiceDeliveryLog::KIND_PAID_EMAIL]
             );
 
             return;
@@ -78,22 +89,19 @@ class PropertyInvoiceEmailService
                 null,
                 $subject,
                 'Invoice email could not be sent right now.',
-                ['kind' => self::KIND_PAID]
+                ['kind' => PropertyInvoiceDeliveryLog::KIND_PAID_EMAIL]
             );
 
             return;
         }
 
+        $successfulRecipients = $this->successfulDeliveryRecipients($invoice, PropertyInvoiceDeliveryLog::KIND_PAID_EMAIL);
+
         foreach ($recipients as $recipient) {
             $recipientEmail = trim((string) ($recipient['email'] ?? ''));
             $recipientName = trim((string) ($recipient['name'] ?? ''));
 
-            if ($this->propertyInvoiceService->hasSuccessfulDelivery(
-                $invoice,
-                'email',
-                $recipientEmail,
-                self::KIND_PAID
-            )) {
+            if ($recipientEmail !== '' && isset($successfulRecipients[Str::lower($recipientEmail)])) {
                 continue;
             }
 
@@ -129,8 +137,13 @@ class PropertyInvoiceEmailService
                     $recipientName !== '' ? $recipientName : null,
                     $subject,
                     'Paid invoice email sent.',
-                    ['kind' => self::KIND_PAID]
+                    ['kind' => PropertyInvoiceDeliveryLog::KIND_PAID_EMAIL]
                 );
+
+                if ($recipientEmail !== '') {
+                    $successfulRecipients[Str::lower($recipientEmail)] = true;
+                    $this->successfulDeliveryCache[$this->successfulDeliveryCacheKey($invoice, PropertyInvoiceDeliveryLog::KIND_PAID_EMAIL)] = $successfulRecipients;
+                }
             } catch (Throwable $exception) {
                 Log::error('Property invoice email failed.', [
                     'invoice_uuid' => $invoice->uuid,
@@ -147,13 +160,13 @@ class PropertyInvoiceEmailService
                     $recipientName !== '' ? $recipientName : null,
                     $subject,
                     'Invoice email could not be sent to this recipient right now.',
-                    ['kind' => self::KIND_PAID]
+                    ['kind' => PropertyInvoiceDeliveryLog::KIND_PAID_EMAIL]
                 );
             }
         }
     }
 
-    public function sendReminderInvoice(PropertyInvoice $invoice, string $recipientEmail, ?string $recipientName, string $subject, string $message): void
+    public function sendReminderInvoice(PropertyInvoice $invoice, string $recipientEmail, ?string $recipientName, string $subject, string $message): array
     {
         $invoice->loadMissing(['workspaceProperty', 'tenant']);
 
@@ -169,10 +182,13 @@ class PropertyInvoiceEmailService
                 $recipientName !== '' ? $recipientName : null,
                 $subject,
                 'Reminder email could not be sent because the email address is missing.',
-                ['kind' => self::KIND_REMINDER]
+                ['kind' => PropertyInvoiceDeliveryLog::KIND_REMINDER_EMAIL]
             );
 
-            return;
+            return [
+                'status' => PropertyInvoiceDeliveryLog::STATUS_FAILED,
+                'message' => 'Reminder email could not be sent because the email address is missing.',
+            ];
         }
 
         if (!$this->isDeliverableEmail($recipientEmail)) {
@@ -184,10 +200,13 @@ class PropertyInvoiceEmailService
                 $recipientName !== '' ? $recipientName : null,
                 $subject,
                 'Reminder email was not sent because the email address is not valid for delivery.',
-                ['kind' => self::KIND_REMINDER]
+                ['kind' => PropertyInvoiceDeliveryLog::KIND_REMINDER_EMAIL]
             );
 
-            return;
+            return [
+                'status' => PropertyInvoiceDeliveryLog::STATUS_FAILED,
+                'message' => 'Reminder email was not sent because the email address is not valid for delivery.',
+            ];
         }
 
         $tenantName = (string) data_get($invoice->meta, 'tenant_full_name', $invoice->tenant?->display_name ?: $invoice->tenant?->name ?: 'Workspace');
@@ -217,8 +236,13 @@ class PropertyInvoiceEmailService
                 $recipientName !== '' ? $recipientName : null,
                 $subject,
                 'Reminder invoice email sent.',
-                ['kind' => self::KIND_REMINDER]
+                ['kind' => PropertyInvoiceDeliveryLog::KIND_REMINDER_EMAIL]
             );
+
+            return [
+                'status' => PropertyInvoiceDeliveryLog::STATUS_SENT,
+                'message' => 'Reminder invoice email sent.',
+            ];
         } catch (Throwable $exception) {
             Log::error('Reminder invoice email failed.', [
                 'invoice_uuid' => $invoice->uuid,
@@ -235,17 +259,28 @@ class PropertyInvoiceEmailService
                 $recipientName !== '' ? $recipientName : null,
                 $subject,
                 'Reminder invoice email could not be sent right now.',
-                ['kind' => self::KIND_REMINDER]
+                ['kind' => PropertyInvoiceDeliveryLog::KIND_REMINDER_EMAIL]
             );
+
+            return [
+                'status' => PropertyInvoiceDeliveryLog::STATUS_FAILED,
+                'message' => $exception->getMessage(),
+            ];
         }
     }
 
-    private function resolveInvoiceRecipients(PropertyInvoice $invoice): array
+    public function resolveReminderRecipients(PropertyInvoice $invoice): array
     {
         $tenant = $invoice->tenant;
 
         if (!$tenant instanceof Tenant || blank($invoice->property_uuid)) {
             return [];
+        }
+
+        $cacheKey = $this->recipientCacheKey($tenant->id, (string) $invoice->property_uuid);
+
+        if (array_key_exists($cacheKey, $this->recipientCache)) {
+            return $this->recipientCache[$cacheKey];
         }
 
         $currentTenant = Tenant::current();
@@ -258,15 +293,14 @@ class PropertyInvoiceEmailService
                 ->value('id');
 
             if (!$propertyId) {
-                return [];
+                return $this->recipientCache[$cacheKey] = [];
             }
 
-            return collect($this->recipientResolver->resolveForPropertiesWithPermissions(
+            return $this->recipientCache[$cacheKey] = collect($this->recipientResolver->resolveForPropertiesWithPermissions(
                 [(int) $propertyId],
                 (array) config('property_subscription_alerts.staff_permissions', [])
             )[(int) $propertyId] ?? [])
-                ->filter(fn (array $recipient) => trim((string) ($recipient['email'] ?? '')) !== '')
-                ->unique(fn (array $recipient) => strtolower(trim((string) ($recipient['email'] ?? ''))))
+                ->unique(fn (array $recipient) => (string) ($recipient['recipient_key'] ?? ''))
                 ->values()
                 ->all();
         } finally {
@@ -292,5 +326,38 @@ class PropertyInvoiceEmailService
             'localhost',
             'test',
         ], true);
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function successfulDeliveryRecipients(PropertyInvoice $invoice, string $kind): array
+    {
+        $cacheKey = $this->successfulDeliveryCacheKey($invoice, $kind);
+
+        if (array_key_exists($cacheKey, $this->successfulDeliveryCache)) {
+            return $this->successfulDeliveryCache[$cacheKey];
+        }
+
+        return $this->successfulDeliveryCache[$cacheKey] = DB::connection('base')
+            ->table('property_invoice_delivery_logs')
+            ->where('property_invoice_id', $invoice->id)
+            ->where('channel', PropertyInvoiceDeliveryLog::CHANNEL_EMAIL)
+            ->where('status', PropertyInvoiceDeliveryLog::STATUS_SENT)
+            ->where('kind', $kind)
+            ->pluck('recipient_address')
+            ->filter(fn ($address) => trim((string) $address) !== '')
+            ->mapWithKeys(fn ($address) => [Str::lower(trim((string) $address)) => true])
+            ->all();
+    }
+
+    private function recipientCacheKey(int $tenantId, string $propertyUuid): string
+    {
+        return $tenantId.':'.$propertyUuid;
+    }
+
+    private function successfulDeliveryCacheKey(PropertyInvoice $invoice, string $kind): string
+    {
+        return $invoice->id.':'.$kind;
     }
 }

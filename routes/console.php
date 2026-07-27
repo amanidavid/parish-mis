@@ -1,7 +1,9 @@
 <?php
 
 use App\Models\Landlord\AutomationTaskSetting;
+use App\Models\Landlord\PropertyInvoice;
 use App\Models\Tenancy\Tenant;
+use App\Services\V1\Billing\PropertyInvoiceReminderResendService;
 use App\Services\V1\Billing\PropertySubscriptionAutomationService;
 use App\Services\V1\Billing\WorkspaceTrialAlertService;
 use App\Services\V1\Billing\WorkspacePropertyRegistryService;
@@ -243,4 +245,56 @@ Artisan::command('billing:run-automation', function () {
     return self::SUCCESS;
 })->purpose('Run due billing automation tasks');
 
-// Schedule::command('billing:run-automation')->everyMinute();
+Artisan::command('invoices:resend-reminder {invoice_uuid?} {--invoice=*} {--delivery-log=*} {--channel=email} {--status=} {--source-channel=} {--search=} {--search-by=invoice_number} {--tenant=} {--date-from=} {--date-to=} {--limit=100} {--force=1}', function () {
+    $invoiceUuids = collect(array_merge(
+        $this->argument('invoice_uuid') ? [(string) $this->argument('invoice_uuid')] : [],
+        (array) $this->option('invoice')
+    ))
+        ->filter()
+        ->unique()
+        ->values()
+        ->all();
+
+    $payload = array_filter([
+        'channel' => (string) $this->option('channel'),
+        'force' => filter_var($this->option('force'), FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? true,
+        'limit' => (int) $this->option('limit'),
+        'invoice_uuids' => $invoiceUuids !== [] ? $invoiceUuids : null,
+        'delivery_log_uuids' => ($deliveryLogs = collect((array) $this->option('delivery-log'))->filter()->unique()->values()->all()) !== [] ? $deliveryLogs : null,
+        'delivery_status' => $this->option('status') ?: null,
+        'source_channel' => $this->option('source-channel') ?: null,
+        'search' => $this->option('search') ?: null,
+        'search_by' => $this->option('search-by') ?: null,
+        'tenant_uuid' => $this->option('tenant') ?: null,
+        'date_from' => $this->option('date-from') ?: null,
+        'date_to' => $this->option('date-to') ?: null,
+    ], fn ($value) => $value !== null && $value !== '');
+
+    $service = app(PropertyInvoiceReminderResendService::class);
+
+    try {
+        if (count($invoiceUuids) === 1 && !isset($payload['delivery_log_uuids']) && count($payload) <= 3) {
+            $invoice = PropertyInvoice::query()
+                ->where('uuid', $invoiceUuids[0])
+                ->firstOrFail();
+
+            $result = $service->queueInvoiceReminder(
+                $invoice,
+                (string) ($payload['channel'] ?? 'email'),
+                (bool) ($payload['force'] ?? true)
+            );
+        } else {
+            $result = $service->queueBulk($payload);
+        }
+    } catch (Throwable $exception) {
+        $this->error($exception->getMessage());
+
+        return self::FAILURE;
+    }
+
+    $this->info(json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+    return self::SUCCESS;
+})->purpose('Resend one or many property invoice reminders by channel, invoice selection, or indexed delivery-log filters');
+
+Schedule::command('billing:run-automation')->everyMinute();

@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\V1\AuthController as AdminAuthController;
 use App\Http\Controllers\Api\Admin\V1\Billing\AutomationTaskController;
 use App\Http\Controllers\Api\Admin\V1\Billing\AdminAnalyticsController;
+use App\Http\Controllers\Api\Admin\V1\Billing\PropertyInvoiceReminderController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertySubscriptionReportController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionPaymentController;
@@ -97,6 +98,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('reports/property-subscription-payments/summary', [PropertySubscriptionReportController::class, 'paymentSummary']);
                 Route::get('reports/property-subscriptions/by-workspace', [PropertySubscriptionReportController::class, 'byWorkspace']);
                 Route::get('reports/property-subscriptions/expired', [PropertySubscriptionReportController::class, 'expired']);
+                Route::post('property-invoices/resend-reminders', [PropertyInvoiceReminderController::class, 'bulkResend']);
+                Route::post('property-invoices/{propertyInvoice}/resend-reminder', [PropertyInvoiceReminderController::class, 'resend']);
                 Route::get('automation/tasks', [AutomationTaskController::class, 'index']);
                 Route::get('automation/tasks/{automationTaskSetting}/runs', [AutomationTaskController::class, 'runs']);
                 Route::patch('automation/tasks/{automationTaskSetting}', [AutomationTaskController::class, 'update']);
