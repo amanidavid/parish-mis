@@ -296,6 +296,7 @@ class PropertyInvoiceService
             'property_invoice_id' => $invoice->id,
             'channel' => $channel,
             'status' => $status,
+            'kind' => is_string($meta['kind'] ?? null) ? $meta['kind'] : null,
             'recipient_name' => $recipientName,
             'recipient_address' => $recipientAddress,
             'subject' => $subject,
@@ -318,9 +319,9 @@ class PropertyInvoiceService
         return PropertyInvoiceDeliveryLog::query()
             ->where('property_invoice_id', $invoice->id)
             ->where('channel', $channel)
-            ->where('status', 'sent')
+            ->where('status', PropertyInvoiceDeliveryLog::STATUS_SENT)
             ->whereRaw('LOWER(recipient_address) = ?', [mb_strtolower(trim($recipientAddress), 'UTF-8')])
-            ->where('meta->kind', $kind)
+            ->where('kind', $kind)
             ->exists();
     }
 

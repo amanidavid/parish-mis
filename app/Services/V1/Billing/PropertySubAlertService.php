@@ -118,7 +118,7 @@ class PropertySubAlertService
                     $tenantPropertyId = $propertyIdMap[$subscription->property_uuid] ?? null;
                     if (!$tenantPropertyId) {
                         continue;
-                    }
+                    } 
 
                     $invoice = $this->propertyInvoiceService->ensureInvoiceForUpcomingPeriod(
                         $tenant,
