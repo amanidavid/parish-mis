@@ -20,6 +20,11 @@ class PropertyInvoicePolicy
             && $this->propertyAssignmentAccessService->canAccessPropertyModel($user, $property);
     }
 
+    public function viewWorkspace(User $user): bool
+    {
+        return $user->hasPermissionTo('property_invoices.view');
+    }
+
     public function view(User $user, PropertyInvoice $propertyInvoice, Property $property): bool
     {
         return $user->hasPermissionTo('property_invoices.view')

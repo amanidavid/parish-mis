@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\V1\AuthController as AdminAuthController;
 use App\Http\Controllers\Api\Admin\V1\Billing\AutomationTaskController;
 use App\Http\Controllers\Api\Admin\V1\Billing\AdminAnalyticsController;
+use App\Http\Controllers\Api\Admin\V1\Billing\PropertyInvoiceController as AdminPropertyInvoiceController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertyInvoiceReminderController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertySubscriptionReportController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionController;
@@ -98,6 +99,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('reports/property-subscription-payments/summary', [PropertySubscriptionReportController::class, 'paymentSummary']);
                 Route::get('reports/property-subscriptions/by-workspace', [PropertySubscriptionReportController::class, 'byWorkspace']);
                 Route::get('reports/property-subscriptions/expired', [PropertySubscriptionReportController::class, 'expired']);
+                Route::get('property-invoices', [AdminPropertyInvoiceController::class, 'index']);
                 Route::post('property-invoices/resend-reminders', [PropertyInvoiceReminderController::class, 'bulkResend']);
                 Route::post('property-invoices/{propertyInvoice}/resend-reminder', [PropertyInvoiceReminderController::class, 'resend']);
                 Route::get('automation/tasks', [AutomationTaskController::class, 'index']);
@@ -148,6 +150,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('recent-expenses', [MaintenanceReportController::class, 'recentExpenses']);
                 });
                 Route::get('workspace/subscription', [WorkspaceController::class, 'subscription']);
+                Route::get('workspace/invoices', [PropertyInvoiceController::class, 'workspaceIndex']);
                 Route::post('workspace/subscription/billing-profile/preview', [WorkspaceController::class, 'previewBillingProfileChange']);
                 Route::get('workspace/subscription/properties', [WorkspaceController::class, 'subscriptionProperties']);
                 Route::get('workspace/subscription/properties/cost-breakdown', [WorkspaceController::class, 'propertyCostBreakdown']);

@@ -9,6 +9,9 @@ use App\Models\Landlord\PropertyInvoiceItem;
 use App\Models\Landlord\PropertySubscription;
 use App\Models\Landlord\PropertySubscriptionPayment;
 use App\Models\Landlord\WorkspaceProperty;
+use App\Models\Tenant\Property;
+use App\Models\Tenant\User;
+use App\Services\V1\PropertyAssignmentAccessService;
 use App\Models\Tenancy\Tenant;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -19,6 +22,7 @@ class PropertyInvoiceService
 {
     public function __construct(
         private WorkspaceBillingRuleService $workspaceBillingRuleService,
+        private PropertyAssignmentAccessService $propertyAssignmentAccessService,
     ) {
     }
 
@@ -68,6 +72,62 @@ class PropertyInvoiceService
         $this->refreshStatus($invoice);
 
         return $invoice->fresh(['workspaceProperty', 'items', 'deliveryLogs']);
+    }
+
+    public function listWorkspaceInvoices(Tenant $tenant, User $user, array $filters = []): LengthAwarePaginator
+    {
+        $allowedPropertyUuids = $this->accessiblePropertyUuids($user);
+        $this->syncOverdueInvoicesForTenant($tenant->id, $allowedPropertyUuids);
+
+        $query = PropertyInvoice::query()
+            ->with(['workspaceProperty', 'items'])
+            ->where('tenant_id', $tenant->id);
+
+        if ($allowedPropertyUuids !== null) {
+            if ($allowedPropertyUuids === []) {
+                return $query->whereRaw('1 = 0')
+                    ->paginate((int) ($filters['per_page'] ?? 15))
+                    ->withQueryString();
+            }
+
+            $query->whereIn('property_uuid', $allowedPropertyUuids);
+        }
+
+        if (!empty($filters['property_uuid'] ?? null)) {
+            $workspacePropertyId = WorkspaceProperty::query()
+                ->where('tenant_id', $tenant->id)
+                ->where('property_uuid', $filters['property_uuid'])
+                ->whereNull('property_deleted_at')
+                ->value('id');
+
+            if (!$workspacePropertyId) {
+                return $query->whereRaw('1 = 0')
+                    ->paginate((int) ($filters['per_page'] ?? 15))
+                    ->withQueryString();
+            }
+
+            $query->where('workspace_property_id', $workspacePropertyId);
+        }
+
+        if (!empty($filters['status'] ?? null)) {
+            $query->where('status', $filters['status']);
+        }
+
+        if (!empty($filters['search'] ?? null)) {
+            $this->applyPrefixSearch($query, 'invoice_number', (string) $filters['search']);
+        }
+
+        if (!empty($filters['start_date'] ?? null)) {
+            $query->where('issue_date', '>=', $filters['start_date']);
+        }
+
+        if (!empty($filters['end_date'] ?? null)) {
+            $query->where('issue_date', '<=', $filters['end_date']);
+        }
+
+        $this->applySort($query, $filters['sort'] ?? null);
+
+        return $query->paginate((int) ($filters['per_page'] ?? 15))->withQueryString();
     }
 
     public function ensureInvoiceForUpcomingPeriod(
@@ -390,6 +450,61 @@ class PropertyInvoiceService
             ->where('status', '!=', PropertyInvoice::STATUS_PAID)
             ->whereDate('due_date', '<', Carbon::today()->toDateString())
             ->update(['status' => PropertyInvoice::STATUS_OVERDUE]);
+    }
+
+    private function syncOverdueInvoicesForTenant(int $tenantId, ?array $propertyUuids = null): void
+    {
+        $query = PropertyInvoice::query()
+            ->where('tenant_id', $tenantId)
+            ->where('status', '!=', PropertyInvoice::STATUS_PAID)
+            ->whereDate('due_date', '<', Carbon::today()->toDateString());
+
+        if (is_array($propertyUuids)) {
+            if ($propertyUuids === []) {
+                return;
+            }
+
+            $query->whereIn('property_uuid', $propertyUuids);
+        }
+
+        $query->update(['status' => PropertyInvoice::STATUS_OVERDUE]);
+    }
+
+    /**
+     * @return array<int, string>|null
+     */
+    private function accessiblePropertyUuids(User $user): ?array
+    {
+        if ($this->propertyAssignmentAccessService->canBypassPropertyScope($user)) {
+            return null;
+        }
+
+        $propertyIds = $this->propertyAssignmentAccessService->assignedPropertyIds($user);
+
+        if ($propertyIds === []) {
+            return [];
+        }
+
+        return Property::query()
+            ->whereIn('id', $propertyIds)
+            ->pluck('uuid')
+            ->map(fn ($uuid) => (string) $uuid)
+            ->all();
+    }
+
+    private function applyPrefixSearch($query, string $column, string $search)
+    {
+        $search = trim($search);
+
+        if ($search === '') {
+            return $query;
+        }
+
+        if (DB::connection('base')->getDriverName() === 'pgsql') {
+            return $query->whereRaw('LOWER('.$column.') LIKE ?', [mb_strtolower($search, 'UTF-8').'%']);
+        }
+
+        return $query->where($column, 'like', $search.'%');
     }
 
     private function applySort($query, ?string $sort): void

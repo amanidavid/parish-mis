@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Api\App\V1\Billing;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\App\V1\Billing\PropertyInvoiceIndexRequest;
+use App\Http\Requests\Api\App\V1\Billing\WorkspaceInvoiceIndexRequest;
 use App\Http\Resources\App\V1\Billing\PropertyInvoiceResource;
 use App\Models\Landlord\PropertyInvoice;
 use App\Models\Tenant\Property;
+use App\Models\Tenant\User;
 use App\Models\Tenancy\Tenant;
 use App\Services\V1\Billing\PropertyInvoicePdfService;
 use App\Services\V1\Billing\PropertyInvoiceService;
@@ -18,6 +20,28 @@ class PropertyInvoiceController extends Controller
         private PropertyInvoiceService $propertyInvoiceService,
         private PropertyInvoicePdfService $propertyInvoicePdfService,
     ) {
+    }
+
+    public function workspaceIndex(WorkspaceInvoiceIndexRequest $request)
+    {
+        $this->authorize('viewWorkspace', PropertyInvoice::class);
+
+        $tenant = request()->attributes->get('tenant');
+        $tenantUser = request()->user();
+
+        if (!$tenant instanceof Tenant || !$tenantUser instanceof User) {
+            return ApiResponse::serverError(
+                ['workspace' => ['Workspace is not available right now.']],
+                'Workspace is not available right now.'
+            );
+        }
+
+        $invoices = $this->propertyInvoiceService->listWorkspaceInvoices($tenant, $tenantUser, $request->validated());
+
+        return ApiResponse::resource(
+            PropertyInvoiceResource::collection($invoices),
+            'Workspace invoices retrieved successfully.'
+        );
     }
 
     public function index(PropertyInvoiceIndexRequest $request, Property $property)
