@@ -25,6 +25,11 @@ class PropertyInvoicePolicy
         return $user->hasPermissionTo('property_invoices.view');
     }
 
+    public function viewWorkspaceInvoice(User $user, PropertyInvoice $propertyInvoice): bool
+    {
+        return $user->hasPermissionTo('property_invoices.view');
+    }
+
     public function view(User $user, PropertyInvoice $propertyInvoice, Property $property): bool
     {
         return $user->hasPermissionTo('property_invoices.view')
@@ -37,5 +42,10 @@ class PropertyInvoicePolicy
         return $user->hasPermissionTo('property_invoices.download')
             && $this->propertyAssignmentAccessService->canAccessPropertyModel($user, $property)
             && $propertyInvoice->property_uuid === $property->uuid;
+    }
+
+    public function downloadWorkspaceInvoice(User $user, PropertyInvoice $propertyInvoice): bool
+    {
+        return $user->hasPermissionTo('property_invoices.download');
     }
 }

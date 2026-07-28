@@ -90,6 +90,32 @@ class PropertyInvoiceController extends Controller
         return $this->propertyInvoicePdfService->stream($invoice, $tenant->display_name ?: $tenant->name);
     }
 
+    public function workspacePreview(string $invoiceUuid)
+    {
+        $tenant = request()->attributes->get('tenant');
+        $tenantUser = request()->user();
+
+        if (!$tenant instanceof Tenant || !$tenantUser instanceof User) {
+            return ApiResponse::serverError(
+                ['workspace' => ['Workspace is not available right now.']],
+                'Workspace is not available right now.'
+            );
+        }
+
+        $invoice = $this->propertyInvoiceService->getWorkspaceInvoice($tenant, $tenantUser, $invoiceUuid);
+
+        if (!$invoice) {
+            return ApiResponse::notFound(
+                ['invoice' => ['Invoice not found.']],
+                'Invoice not found.'
+            );
+        }
+
+        $this->authorize('viewWorkspaceInvoice', $invoice);
+
+        return $this->propertyInvoicePdfService->stream($invoice, $tenant->display_name ?: $tenant->name);
+    }
+
     public function download(Property $property, string $invoiceUuid)
     {
         $tenant = request()->attributes->get('tenant');
@@ -111,6 +137,32 @@ class PropertyInvoiceController extends Controller
         }
 
         $this->authorize('download', [$invoice, $property]);
+
+        return $this->propertyInvoicePdfService->download($invoice, $tenant->display_name ?: $tenant->name);
+    }
+
+    public function workspaceDownload(string $invoiceUuid)
+    {
+        $tenant = request()->attributes->get('tenant');
+        $tenantUser = request()->user();
+
+        if (!$tenant instanceof Tenant || !$tenantUser instanceof User) {
+            return ApiResponse::serverError(
+                ['workspace' => ['Workspace is not available right now.']],
+                'Workspace is not available right now.'
+            );
+        }
+
+        $invoice = $this->propertyInvoiceService->getWorkspaceInvoice($tenant, $tenantUser, $invoiceUuid);
+
+        if (!$invoice) {
+            return ApiResponse::notFound(
+                ['invoice' => ['Invoice not found.']],
+                'Invoice not found.'
+            );
+        }
+
+        $this->authorize('downloadWorkspaceInvoice', $invoice);
 
         return $this->propertyInvoicePdfService->download($invoice, $tenant->display_name ?: $tenant->name);
     }

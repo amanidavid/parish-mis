@@ -55,8 +55,10 @@ class PropertyInvoiceResource extends ApiJsonResource
                 'status' => $this->sent_at ? 'sent' : 'pending',
                 'last_sent_at' => $this->sent_at?->format('Y-m-d H:i:s'),
             ],
-            'preview_url' => url('/api/v1/app/properties/'.$this->property_uuid.'/invoices/'.$this->uuid.'/preview'),
-            'download_url' => url('/api/v1/app/properties/'.$this->property_uuid.'/invoices/'.$this->uuid.'/download'),
+            'preview_url' => url('/api/v1/app/workspace/invoices/'.$this->uuid.'/preview'),
+            'download_url' => url('/api/v1/app/workspace/invoices/'.$this->uuid.'/download'),
+            'property_preview_url' => url('/api/v1/app/properties/'.$this->property_uuid.'/invoices/'.$this->uuid.'/preview'),
+            'property_download_url' => url('/api/v1/app/properties/'.$this->property_uuid.'/invoices/'.$this->uuid.'/download'),
             ...$this->timestamps(),
         ];
     }

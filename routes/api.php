@@ -151,6 +151,8 @@ Route::prefix('v1')->group(function () {
                 });
                 Route::get('workspace/subscription', [WorkspaceController::class, 'subscription']);
                 Route::get('workspace/invoices', [PropertyInvoiceController::class, 'workspaceIndex']);
+                Route::get('workspace/invoices/{invoiceUuid}/preview', [PropertyInvoiceController::class, 'workspacePreview']);
+                Route::get('workspace/invoices/{invoiceUuid}/download', [PropertyInvoiceController::class, 'workspaceDownload']);
                 Route::post('workspace/subscription/billing-profile/preview', [WorkspaceController::class, 'previewBillingProfileChange']);
                 Route::get('workspace/subscription/properties', [WorkspaceController::class, 'subscriptionProperties']);
                 Route::get('workspace/subscription/properties/cost-breakdown', [WorkspaceController::class, 'propertyCostBreakdown']);

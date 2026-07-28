@@ -74,6 +74,35 @@ class PropertyInvoiceService
         return $invoice->fresh(['workspaceProperty', 'items', 'deliveryLogs']);
     }
 
+    public function getWorkspaceInvoice(Tenant $tenant, User $user, string $invoiceUuid): ?PropertyInvoice
+    {
+        $allowedPropertyUuids = $this->accessiblePropertyUuids($user);
+        $this->syncOverdueInvoicesForTenant($tenant->id, $allowedPropertyUuids);
+
+        $query = PropertyInvoice::query()
+            ->with(['workspaceProperty', 'items', 'deliveryLogs'])
+            ->where('tenant_id', $tenant->id)
+            ->where('uuid', $invoiceUuid);
+
+        if ($allowedPropertyUuids !== null) {
+            if ($allowedPropertyUuids === []) {
+                return null;
+            }
+
+            $query->whereIn('property_uuid', $allowedPropertyUuids);
+        }
+
+        $invoice = $query->first();
+
+        if (!$invoice) {
+            return null;
+        }
+
+        $this->refreshStatus($invoice);
+
+        return $invoice->fresh(['workspaceProperty', 'items', 'deliveryLogs']);
+    }
+
     public function listWorkspaceInvoices(Tenant $tenant, User $user, array $filters = []): LengthAwarePaginator
     {
         $allowedPropertyUuids = $this->accessiblePropertyUuids($user);

@@ -23,12 +23,6 @@ class PropertyInvoiceDeliveryLogIndexRequest extends FormRequest
             'date_to' => ['nullable', 'date', 'after_or_equal:date_from'],
             'workspace_uuid' => ['nullable', 'uuid'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
-            'sort' => ['nullable', Rule::in([
-                'last_attempt_at', '-last_attempt_at',
-                'due_date', '-due_date',
-                'status', '-status',
-                'created_at', '-created_at',
-            ])],
         ];
     }
 
@@ -47,7 +41,6 @@ class PropertyInvoiceDeliveryLogIndexRequest extends FormRequest
             'per_page.integer' => 'Per page must be a number.',
             'per_page.min' => 'Per page must be at least 1.',
             'per_page.max' => 'Per page may not be greater than 100.',
-            'sort.in' => 'Sort value is not valid.',
         ];
     }
 }

@@ -87,7 +87,8 @@ class PropertyInvoiceDeliveryLogService
             });
         }
 
-        $this->applySort($query, $filters['sort'] ?? null);
+        $query->orderByDesc('delivery_logs.last_attempt_at')
+            ->orderByDesc('delivery_logs.id');
 
         $logs = $query->paginate((int) ($filters['per_page'] ?? 15))->withQueryString();
 
@@ -100,23 +101,5 @@ class PropertyInvoiceDeliveryLogService
         });
 
         return $logs;
-    }
-
-    /**
-     * Apply indexed sort.
-     */
-    private function applySort($query, ?string $sort): void
-    {
-        $sort = trim((string) $sort);
-        $direction = str_starts_with($sort, '-') ? 'desc' : 'asc';
-        $column = ltrim($sort, '-');
-
-        match ($column) {
-            'due_date' => $query->orderBy('property_invoices.due_date', $direction)->orderByDesc('delivery_logs.id'),
-            'status' => $query->orderBy('delivery_logs.status', $direction)->orderByDesc('delivery_logs.last_attempt_at')->orderByDesc('delivery_logs.id'),
-            'created_at' => $query->orderBy('delivery_logs.created_at', $direction)->orderByDesc('delivery_logs.id'),
-            'last_attempt_at' => $query->orderBy('delivery_logs.last_attempt_at', $direction)->orderByDesc('delivery_logs.id'),
-            default => $query->orderByDesc('delivery_logs.last_attempt_at')->orderByDesc('delivery_logs.id'),
-        };
     }
 }
