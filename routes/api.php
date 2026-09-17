@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\Admin\V1\Billing\AdminAnalyticsController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertyInvoiceController as AdminPropertyInvoiceController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertyInvoiceReminderController;
 use App\Http\Controllers\Api\Admin\V1\Billing\PropertySubscriptionReportController;
+use App\Http\Controllers\Api\Admin\V1\Billing\HistoricalContractEntryGrantController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantPropertySubscriptionPaymentController;
 use App\Http\Controllers\Api\Admin\V1\Billing\TenantSubscriptionUsageAdjustmentController;
@@ -84,6 +85,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('tenants/{tenant}/property-subscription-payments', [TenantPropertySubscriptionPaymentController::class, 'index']);
                 Route::post('tenants/{tenant}/property-subscription-payments/preview', [TenantPropertySubscriptionPaymentController::class, 'preview']);
                 Route::post('tenants/{tenant}/property-subscription-payments', [TenantPropertySubscriptionPaymentController::class, 'store']);
+                Route::get('tenants/{tenant}/historical-contract-entry-grants', [HistoricalContractEntryGrantController::class, 'index']);
+                Route::post('tenants/{tenant}/historical-contract-entry-grants', [HistoricalContractEntryGrantController::class, 'store']);
+                Route::post('tenants/{tenant}/historical-contract-entry-grants/{grantUuid}/revoke', [HistoricalContractEntryGrantController::class, 'revoke']);
                 Route::get('tenants/{tenant}/usage-adjustments/preview', [TenantSubscriptionUsageAdjustmentController::class, 'preview']);
                 Route::get('tenants/{tenant}/usage-adjustments', [TenantSubscriptionUsageAdjustmentController::class, 'index']);
                 Route::post('tenants/{tenant}/usage-adjustments/{usageAdjustment}/apply', [TenantSubscriptionUsageAdjustmentController::class, 'apply']);

@@ -13,6 +13,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Throwable;
 
 class ContractAlertService
@@ -189,6 +190,40 @@ class ContractAlertService
                             );
 
                             if (($existingLogs[$logKey]['status'] ?? null) === 'success') {
+                                continue;
+                            }
+
+                            if ($channel === 'email' && !$this->isDeliverableEmail($address)) {
+                                Log::warning('Contract alert email skipped because the recipient email is not valid for delivery.', [
+
+                                    'recipient_key' => $recipient['recipient_key'],
+                                    'recipient_email' => $address,
+                                    'event_type' => $eventType,
+                                ]);
+
+                                $existingUuid = $existingLogs[$logKey]['uuid'] ?? null;
+                                $existingAttempts = (int) ($existingLogs[$logKey]['attempts_count'] ?? 0);
+                                $failureMessage = 'Contract alert email was not sent because the email address is not valid for delivery.';
+
+                                $this->upsertLog(
+                                    $contract,
+                                    $recipient,
+                                    $channel,
+                                    $eventType,
+                                    $address,
+                                    $subject,
+                                    'failed',
+                                    $failureMessage,
+                                    $existingAttempts,
+                                    $timestamp,
+                                    $existingUuid
+                                );
+                                $existingLogs[$logKey] = [
+                                    'status' => 'failed',
+                                    'attempts_count' => $existingAttempts,
+                                    'uuid' => $existingUuid ?? $existingLogs[$logKey]['uuid'] ?? null,
+                                ];
+
                                 continue;
                             }
 
@@ -437,6 +472,29 @@ class ContractAlertService
             .$message
             ."\n\nPlease do not reply to this email. This mailbox is not monitored."
             ."\n\nRegards,\nZABA Team";
+    }
+
+    /**
+     * Determine whether email is valid for delivery.
+     */
+    private function isDeliverableEmail(string $email): bool
+    {
+        $normalized = Str::lower(trim($email));
+
+        if ($normalized === '' || !filter_var($normalized, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        $domain = Str::after($normalized, '@');
+
+        return !in_array($domain, [
+            'example.com',
+            'example.org',
+            'example.net',
+            'invalid',
+            'localhost',
+            'test',
+        ], true);
     }
 
     /**

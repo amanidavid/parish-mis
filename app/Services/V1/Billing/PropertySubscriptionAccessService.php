@@ -24,6 +24,7 @@ class PropertySubscriptionAccessService
     public function __construct(
         private WorkspacePropertyRegistryService $workspacePropertyRegistryService,
         private SubscriptionService $subscriptionService,
+        private HistoricalContractEntryGrantService $historicalContractEntryGrantService,
     ) {
     }
 
@@ -204,9 +205,15 @@ class PropertySubscriptionAccessService
             return;
         }
 
-        if (!$workspaceProperty || !$subscription || !$subscription->coversDate($targetDate)) {
-            throw new InvalidArgumentException('The selected contract start date is not paid for. There is no active workspace trial or paid property subscription covering that date.');
+        if ($workspaceProperty && $subscription && $subscription->coversDate($targetDate)) {
+            return;
         }
+
+        if ($this->historicalContractEntryGrantService->allowsHistoricalStartDate($tenant, $property, $targetDate->toDateString())) {
+            return;
+        }
+
+        throw new InvalidArgumentException('The selected contract start date is not paid for. There is no active workspace trial, paid property subscription, or active historical contract entry grant covering that date.');
     }
 
     /**

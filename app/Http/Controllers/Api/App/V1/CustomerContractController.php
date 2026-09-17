@@ -665,8 +665,8 @@ class CustomerContractController extends Controller
                 }
             } catch (InvalidArgumentException $exception) {
                 return ApiResponse::error(
-                    'This unit may be available, but the selected contract start date is outside the workspace trial or property subscription paid period.',
-                    ['property_subscription' => ['The unit is available for contracting, but the selected start date is not covered by the workspace trial or the property subscription paid period. Choose a covered start date or extend the property subscription first.']],
+                    'This unit may be available, but the selected contract start date is outside the allowed coverage period.',
+                    ['property_subscription' => ['The unit is available for contracting, but the selected start date is not covered by the workspace trial, property subscription paid period, or an active historical contract entry grant. Choose a covered start date or ask support for a historical-entry grant.']],
                     422
                 );
             }
